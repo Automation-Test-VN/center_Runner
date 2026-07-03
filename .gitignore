@@ -1,0 +1,11 @@
+node_modules/
+jobs/
+.env
+.env.*
+!.env.example
+*.log
+test-results/
+playwright-report/
+blob-report/
+.DS_Store
+Thumbs.db

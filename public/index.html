@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Center Runner - Test Main Function</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="runner-shell">
+      <h1>Center Runner - Test Main Function</h1>
+
+      <section class="domain-panel" aria-label="Domain command form">
+        <form id="runner-form" class="domain-form">
+          <label class="field">
+            <span>Tool Name</span>
+            <select id="tool-name" name="tool" required>
+              <option value="aliveDaily">Alive Daily</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Group Name</span>
+            <select id="group-name" name="group" required></select>
+          </label>
+
+          <label class="field">
+            <span>Brand Name</span>
+            <select id="brand-name" name="brand" required></select>
+          </label>
+
+          <label class="field field-domain">
+            <span>DomainURL</span>
+            <input id="domain-url" name="domainUrl" type="url" placeholder="https://example.com/">
+          </label>
+
+          <label class="field">
+            <span>UserName</span>
+            <input id="username" name="username" autocomplete="username" placeholder="Nh&#7853;p t&#224;i kho&#7843;n">
+          </label>
+
+          <label class="field">
+            <span>Password</span>
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Nh&#7853;p m&#7853;t kh&#7849;u">
+          </label>
+
+          <button class="start-button" type="submit">Start</button>
+        </form>
+
+        <div class="job-row" aria-live="polite">
+          <span>Job ID: <strong id="job-id">-</strong></span>
+          <span>GROUP: <strong id="group-label">-</strong></span>
+          <span>BRAND: <strong id="brand-label">-</strong></span>
+          <span>Status: <strong id="status-label">IDLE</strong></span>
+          <span class="alive-note" id="alive-note"></span>
+        </div>
+      </section>
+
+      <section class="report-panel" aria-label="Report viewer">
+        <iframe id="report-frame" title="Mono report preview"></iframe>
+      </section>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "center-runner",
+  "version": "1.0.0",
+  "description": "Center Runner web queue and worker for domain-based Playwright jobs.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node ./server.mjs",
+    "worker": "node ./worker.mjs",
+    "worker:once": "node ./worker.mjs --once",
+    "worker:dry-run": "node ./worker.mjs --once --dry-run"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
