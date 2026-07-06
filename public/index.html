@@ -54,6 +54,27 @@
           <span>Status: <strong id="status-label">IDLE</strong></span>
           <span class="alive-note" id="alive-note"></span>
         </div>
+
+        <div class="queue-panel" aria-label="Job queue">
+          <table class="job-table">
+            <thead>
+              <tr>
+                <th>Job ID</th>
+                <th>Group</th>
+                <th>Brand</th>
+                <th>Status</th>
+                <th>Exit</th>
+                <th>Created</th>
+                <th>Report</th>
+              </tr>
+            </thead>
+            <tbody id="job-list">
+              <tr>
+                <td colspan="7">No jobs yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="report-panel" aria-label="Report viewer">

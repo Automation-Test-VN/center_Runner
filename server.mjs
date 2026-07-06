@@ -8,6 +8,8 @@ const defaultTestRepoRoot = path.resolve(__dirname, '..', 'TS_PW_FBC');
 const testRepoRoot = path.resolve(process.env.CENTER_RUNNER_TEST_REPO || defaultTestRepoRoot);
 const publicDir = path.join(__dirname, 'public');
 const jobsDir = path.join(__dirname, 'jobs');
+const queuedJobsDir = path.join(jobsDir, 'queue');
+const runningJobsDir = path.join(jobsDir, 'running');
 const testsDir = path.join(testRepoRoot, 'tests');
 const testResultsDir = path.join(testRepoRoot, 'test-results');
 const jobResultsDir = path.join(jobsDir, 'results');
@@ -38,12 +40,15 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/jobs') {
       const payload = await readJson(req);
       const job = buildJob(payload);
-      await fs.mkdir(jobsDir, { recursive: true });
-      await fs.mkdir(jobResultsDir, { recursive: true });
-      await fs.writeFile(path.join(jobsDir, `${job.jobId}.json`), JSON.stringify(job.command, null, 2), 'utf8');
-      await fs.writeFile(latestCommandFile, JSON.stringify(job.command, null, 2), 'utf8');
-      await fs.writeFile(latestJobFile, JSON.stringify(job, null, 2), 'utf8');
-      await removeIfExists(latestResultFile);
+      await ensureJobDirs();
+      const duplicateJob = await findActiveDuplicateJob(job.command);
+      if (duplicateJob) {
+        return sendJson(res, 409, { error: `${job.command.group}/${job.command.brand} is already ${duplicateJob.status}.` });
+      }
+
+      await writeJsonFile(queueJobPath(job), job);
+      await writeJsonFile(latestCommandFile, job.command);
+      await writeJsonFile(latestJobFile, job);
       await writeJobStatus(job);
       await notifyWaitingWorker();
       return sendJson(res, 201, job);
@@ -67,8 +72,8 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/jobs/latest-job') {
-      const body = await fs.readFile(latestJobFile, 'utf8').catch(() => null);
-      return body ? send(res, 200, body, 'application/json; charset=utf-8') : sendJson(res, 404, { error: 'No job has been saved yet.' });
+      const job = await readLatestActiveJob();
+      return job ? sendJson(res, 200, job) : sendJson(res, 404, { error: 'No active job has been saved yet.' });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/jobs/next') {
@@ -87,6 +92,11 @@ const server = createServer(async (req, res) => {
 
     if (req.method !== 'GET') {
       return sendJson(res, 405, { error: 'Method not allowed.' });
+    }
+
+    if (url.pathname === '/api/jobs') {
+      const jobs = await listJobs();
+      return sendJson(res, 200, { jobs });
     }
 
     if (url.pathname === '/api/brands') {
@@ -227,22 +237,26 @@ async function completeJob(payload) {
     throw new Error('Invalid exitCode.');
   }
 
+  const existingResult = await readJobResult(jobId);
+  const command = payload.command || existingResult?.command || null;
   const result = {
+    ...(existingResult || {}),
     jobId,
     status,
     exitCode,
-    command: payload.command || null,
-    startedAt: payload.startedAt || null,
+    command,
+    createdAt: existingResult?.createdAt || null,
+    startedAt: payload.startedAt || existingResult?.startedAt || null,
     finishedAt: payload.finishedAt || new Date().toISOString(),
-    reportUrl: resolveReportUrl(payload.command)
+    reportUrl: resolveReportUrl(command)
   };
 
-  await fs.mkdir(jobResultsDir, { recursive: true });
-  await fs.writeFile(latestResultFile, JSON.stringify(result, null, 2), 'utf8');
-  await fs.writeFile(path.join(jobResultsDir, `${jobId}.json`), JSON.stringify(result, null, 2), 'utf8');
-  await removeIfExists(latestJobFile);
-  await removeIfExists(latestCommandFile);
-  await removeIfExists(path.join(jobsDir, `${jobId}.json`));
+  await ensureJobDirs();
+  await writeJsonFile(latestResultFile, result);
+  await writeJsonFile(path.join(jobResultsDir, `${jobId}.json`), result);
+  await removeIfExists(path.join(runningJobsDir, `${jobId}.json`));
+  await removeIfExists(path.join(queuedJobsDir, `${jobId}.json`));
+  await syncLatestActiveJob();
 
   return {
     ok: true,
@@ -252,26 +266,48 @@ async function completeJob(payload) {
 }
 
 async function claimNextJob() {
-  const raw = await fs.readFile(latestJobFile, 'utf8').catch(() => null);
-  if (!raw) {
+  await ensureJobDirs();
+  const entries = await fs.readdir(queuedJobsDir, { withFileTypes: true }).catch(() => []);
+  const queuedFiles = entries
+    .filter((entry) => entry.isFile() && /^CR-\d{8}-\d{6}-[A-Z0-9]{4}\.json$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+
+  if (queuedFiles.length === 0) {
     return null;
   }
 
-  const job = JSON.parse(raw);
-  if (job.status !== 'QUEUED') {
-    return null;
+  for (const fileName of queuedFiles) {
+    const queuedPath = path.join(queuedJobsDir, fileName);
+    const runningPath = path.join(runningJobsDir, fileName);
+
+    try {
+      await fs.rename(queuedPath, runningPath);
+    } catch (error) {
+      if (['ENOENT', 'EEXIST', 'EPERM'].includes(error?.code)) {
+        continue;
+      }
+
+      throw error;
+    }
+
+    const raw = await fs.readFile(runningPath, 'utf8');
+    const job = JSON.parse(raw);
+    const runningJob = {
+      ...job,
+      status: 'RUNNING',
+      startedAt: new Date().toISOString()
+    };
+
+    await writeJsonFile(runningPath, runningJob);
+    await writeJsonFile(latestJobFile, runningJob);
+    await writeJsonFile(latestCommandFile, runningJob.command);
+    await writeJobStatus(runningJob);
+
+    return runningJob;
   }
 
-  const runningJob = {
-    ...job,
-    status: 'RUNNING',
-    startedAt: new Date().toISOString()
-  };
-
-  await fs.writeFile(latestJobFile, JSON.stringify(runningJob, null, 2), 'utf8');
-  await writeJobStatus(runningJob);
-
-  return runningJob;
+  return null;
 }
 
 function waitForNextJob(res) {
@@ -320,13 +356,107 @@ async function writeJobStatus(job) {
     reportUrl: null
   };
 
-  await fs.mkdir(jobResultsDir, { recursive: true });
-  await fs.writeFile(path.join(jobResultsDir, `${job.jobId}.json`), JSON.stringify(result, null, 2), 'utf8');
+  await ensureJobDirs();
+  await writeJsonFile(path.join(jobResultsDir, `${job.jobId}.json`), result);
 }
 
 async function readJobResult(jobId) {
   const body = await fs.readFile(path.join(jobResultsDir, `${jobId}.json`), 'utf8').catch(() => null);
   return body ? JSON.parse(body) : null;
+}
+
+async function listJobs() {
+  await ensureJobDirs();
+  const entries = await fs.readdir(jobResultsDir, { withFileTypes: true }).catch(() => []);
+  const activeJobs = await listActiveJobs();
+  const activeJobIds = new Set(activeJobs.map((job) => job.jobId));
+  const jobs = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^CR-\d{8}-\d{6}-[A-Z0-9]{4}\.json$/.test(entry.name)) {
+      continue;
+    }
+
+    const body = await fs.readFile(path.join(jobResultsDir, entry.name), 'utf8').catch(() => null);
+    if (!body) {
+      continue;
+    }
+
+    const job = JSON.parse(body);
+    jobs.push({
+      ...job,
+      active: activeJobIds.has(job.jobId)
+    });
+  }
+
+  return jobs.sort((a, b) => {
+    const left = Date.parse(a.finishedAt || a.startedAt || a.createdAt || '') || 0;
+    const right = Date.parse(b.finishedAt || b.startedAt || b.createdAt || '') || 0;
+    return right - left;
+  });
+}
+
+async function readLatestActiveJob() {
+  const activeJobs = await listActiveJobs();
+  return activeJobs[0] || null;
+}
+
+async function syncLatestActiveJob() {
+  const activeJob = await readLatestActiveJob();
+  if (!activeJob) {
+    await removeIfExists(latestJobFile);
+    await removeIfExists(latestCommandFile);
+    return;
+  }
+
+  await writeJsonFile(latestJobFile, {
+    jobId: activeJob.jobId,
+    createdAt: activeJob.createdAt || null,
+    startedAt: activeJob.startedAt || null,
+    status: activeJob.status,
+    command: activeJob.command
+  });
+  await writeJsonFile(latestCommandFile, activeJob.command);
+}
+
+async function findActiveDuplicateJob(command) {
+  const activeJobs = await listActiveJobs();
+  return activeJobs.find((job) => commandsEqual(job.command, command)) || null;
+}
+
+async function listActiveJobs() {
+  await ensureJobDirs();
+  const jobs = [];
+
+  for (const dir of [runningJobsDir, queuedJobsDir]) {
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !/^CR-\d{8}-\d{6}-[A-Z0-9]{4}\.json$/.test(entry.name)) {
+        continue;
+      }
+
+      const body = await fs.readFile(path.join(dir, entry.name), 'utf8').catch(() => null);
+      if (!body) {
+        continue;
+      }
+
+      jobs.push(JSON.parse(body));
+    }
+  }
+
+  return jobs.sort((a, b) => {
+    const left = Date.parse(a.startedAt || a.createdAt || '') || 0;
+    const right = Date.parse(b.startedAt || b.createdAt || '') || 0;
+    return right - left;
+  });
+}
+
+function commandsEqual(left, right) {
+  return left?.tool === right?.tool
+    && left?.group === right?.group
+    && left?.brand === right?.brand
+    && left?.tag === right?.tag;
 }
 
 async function checkDomain(domainUrl) {
@@ -379,6 +509,25 @@ function resolveReportPath(requestPath) {
   const normalized = path.normalize(relativePath).replace(/^(\.\.[/\\])+/, '');
   const reportPath = path.join(testResultsDir, normalized);
   return reportPath.startsWith(testResultsDir) ? reportPath : null;
+}
+
+function queueJobPath(job) {
+  return path.join(queuedJobsDir, `${job.jobId}.json`);
+}
+
+async function ensureJobDirs() {
+  await Promise.all([
+    fs.mkdir(jobsDir, { recursive: true }),
+    fs.mkdir(queuedJobsDir, { recursive: true }),
+    fs.mkdir(runningJobsDir, { recursive: true }),
+    fs.mkdir(jobResultsDir, { recursive: true })
+  ]);
+}
+
+async function writeJsonFile(filePath, payload) {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  await fs.rename(tempPath, filePath);
 }
 
 async function removeIfExists(filePath) {

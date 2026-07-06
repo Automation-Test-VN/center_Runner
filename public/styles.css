@@ -147,6 +147,60 @@ button:disabled {
   font-size: 13px;
 }
 
+.queue-panel {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.job-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+  font-size: 13px;
+}
+
+.job-table th,
+.job-table td {
+  border: 1px solid var(--soft-line);
+  padding: 7px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.job-table th {
+  background: var(--section);
+  font-size: 12px;
+}
+
+.job-table tr[data-status="RUNNING"] {
+  background: #eef6ff;
+}
+
+.job-table tr[data-status="QUEUED"] {
+  background: #fff8e6;
+}
+
+.status-done {
+  color: #12733d;
+  font-weight: 700;
+}
+
+.status-failed {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.status-running,
+.status-queued {
+  color: #1749c8;
+  font-weight: 700;
+}
+
+.report-button {
+  height: 28px;
+  padding: 0 10px;
+}
+
 .report-panel {
   height: min(640px, calc(100vh - 190px));
   min-height: 420px;
