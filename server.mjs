@@ -1,9 +1,13 @@
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const startWorkersBatPath = path.join(__dirname, 'jenkins', 'start-workers.bat');
+
 const defaultTestRepoRoot = path.resolve(__dirname, '..', 'TS_PW_FBC');
 const testRepoRoot = path.resolve(process.env.CENTER_RUNNER_TEST_REPO || defaultTestRepoRoot);
 const publicDir = path.join(__dirname, 'public');
@@ -37,13 +41,21 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
+    if (req.method === 'POST' && url.pathname === '/api/workers/start') {
+      const result = await startWorkersBat();
+      return sendJson(res, result.statusCode, result.body);
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/jobs') {
       const payload = await readJson(req);
       const job = buildJob(payload);
       await ensureJobDirs();
+
       const duplicateJob = await findActiveDuplicateJob(job.command);
       if (duplicateJob) {
-        return sendJson(res, 409, { error: `${job.command.group}/${job.command.brand} is already ${duplicateJob.status}.` });
+        return sendJson(res, 409, {
+          error: `${job.command.group}/${job.command.brand} is already ${duplicateJob.status}.`
+        });
       }
 
       await writeJsonFile(queueJobPath(job), job);
@@ -51,6 +63,7 @@ const server = createServer(async (req, res) => {
       await writeJsonFile(latestJobFile, job);
       await writeJobStatus(job);
       await notifyWaitingWorker();
+
       return sendJson(res, 201, job);
     }
 
@@ -68,12 +81,16 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/api/jobs/latest') {
       const body = await fs.readFile(latestCommandFile, 'utf8').catch(() => null);
-      return body ? send(res, 200, body, 'application/json; charset=utf-8') : sendJson(res, 404, { error: 'No command has been saved yet.' });
+      return body
+        ? send(res, 200, body, 'application/json; charset=utf-8')
+        : sendJson(res, 404, { error: 'No command has been saved yet.' });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/jobs/latest-job') {
       const job = await readLatestActiveJob();
-      return job ? sendJson(res, 200, job) : sendJson(res, 404, { error: 'No active job has been saved yet.' });
+      return job
+        ? sendJson(res, 200, job)
+        : sendJson(res, 404, { error: 'No active job has been saved yet.' });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/jobs/next') {
@@ -87,7 +104,9 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/api/jobs/latest-result') {
       const body = await fs.readFile(latestResultFile, 'utf8').catch(() => null);
-      return body ? send(res, 200, body, 'application/json; charset=utf-8') : sendJson(res, 404, { error: 'No result has been saved yet.' });
+      return body
+        ? send(res, 200, body, 'application/json; charset=utf-8')
+        : sendJson(res, 404, { error: 'No result has been saved yet.' });
     }
 
     if (req.method !== 'GET') {
@@ -107,7 +126,9 @@ const server = createServer(async (req, res) => {
     const jobResultMatch = url.pathname.match(/^\/api\/jobs\/(CR-\d{8}-\d{6}-[A-Z0-9]{4})\/result$/);
     if (jobResultMatch) {
       const result = await readJobResult(jobResultMatch[1]);
-      return result ? sendJson(res, 200, result) : sendJson(res, 404, { error: 'No result found for job.' });
+      return result
+        ? sendJson(res, 200, result)
+        : sendJson(res, 404, { error: 'No result found for job.' });
     }
 
     if (url.pathname.startsWith('/reports/')) {
@@ -117,7 +138,12 @@ const server = createServer(async (req, res) => {
       }
 
       const body = await fs.readFile(reportPath);
-      return send(res, 200, body, contentTypes.get(path.extname(reportPath).toLowerCase()) || 'application/octet-stream');
+      return send(
+        res,
+        200,
+        body,
+        contentTypes.get(path.extname(reportPath).toLowerCase()) || 'application/octet-stream'
+      );
     }
 
     const filePath = resolveStaticPath(url.pathname);
@@ -128,12 +154,17 @@ const server = createServer(async (req, res) => {
     const body = await fs.readFile(filePath);
     return send(res, 200, body, contentTypes.get(path.extname(filePath)) || 'application/octet-stream');
   } catch (error) {
-    return sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    return sendJson(res, 500, {
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 });
 
 server.listen(port, host, () => {
   console.log(`Center Runner listening on http://localhost:${port}`);
+  console.log(`Center Runner host binding: ${host}:${port}`);
+  console.log(`Test repo root: ${testRepoRoot}`);
+  console.log(`Start workers BAT: ${startWorkersBatPath}`);
 });
 
 function resolveStaticPath(requestPath) {
@@ -145,6 +176,7 @@ function resolveStaticPath(requestPath) {
 
 async function readJson(req) {
   const chunks = [];
+
   for await (const chunk of req) {
     chunks.push(chunk);
   }
@@ -164,12 +196,16 @@ async function collectBrandGroups() {
 
     const groupPath = path.join(testsDir, entry.name);
     const brandEntries = await fs.readdir(groupPath, { withFileTypes: true }).catch(() => []);
+
     const brands = brandEntries
       .filter((brandEntry) => brandEntry.isDirectory() && /^[a-z0-9-]+$/.test(brandEntry.name))
       .map((brandEntry) => brandEntry.name)
       .sort((a, b) => a.localeCompare(b));
 
-    groups.push({ name: entry.name, brands });
+    groups.push({
+      name: entry.name,
+      brands
+    });
   }
 
   return groups.sort((a, b) => a.name.localeCompare(b.name));
@@ -239,12 +275,15 @@ async function completeJob(payload) {
 
   const existingResult = await readJobResult(jobId);
   const command = payload.command || existingResult?.command || null;
+
   const result = {
     ...(existingResult || {}),
     jobId,
     status,
     exitCode,
     command,
+    workerIp: payload.workerIp || existingResult?.workerIp || null,
+    workerName: payload.workerName || existingResult?.workerName || null,
     createdAt: existingResult?.createdAt || null,
     startedAt: payload.startedAt || existingResult?.startedAt || null,
     finishedAt: payload.finishedAt || new Date().toISOString(),
@@ -267,7 +306,9 @@ async function completeJob(payload) {
 
 async function claimNextJob() {
   await ensureJobDirs();
+
   const entries = await fs.readdir(queuedJobsDir, { withFileTypes: true }).catch(() => []);
+
   const queuedFiles = entries
     .filter((entry) => entry.isFile() && /^CR-\d{8}-\d{6}-[A-Z0-9]{4}\.json$/.test(entry.name))
     .map((entry) => entry.name)
@@ -293,6 +334,7 @@ async function claimNextJob() {
 
     const raw = await fs.readFile(runningPath, 'utf8');
     const job = JSON.parse(raw);
+
     const runningJob = {
       ...job,
       status: 'RUNNING',
@@ -311,7 +353,11 @@ async function claimNextJob() {
 }
 
 function waitForNextJob(res) {
-  const waiter = { res, timeout: null };
+  const waiter = {
+    res,
+    timeout: null
+  };
+
   waiter.timeout = setTimeout(() => {
     const index = waitingWorkers.indexOf(waiter);
     if (index >= 0) {
@@ -319,7 +365,7 @@ function waitForNextJob(res) {
     }
 
     if (!res.writableEnded) {
-      sendJson(res, 204, { ok: false, message: 'No job available.' });
+      sendNoContent(res);
     }
   }, workerWaitTimeoutMs);
 
@@ -328,18 +374,20 @@ function waitForNextJob(res) {
 
 async function notifyWaitingWorker() {
   const waiter = waitingWorkers.shift();
+
   if (!waiter) {
     return;
   }
 
   clearTimeout(waiter.timeout);
+
   const job = await claimNextJob();
 
   if (!waiter.res.writableEnded) {
     if (job) {
       sendJson(waiter.res, 200, job);
     } else {
-      sendJson(waiter.res, 204, { ok: false, message: 'No job available.' });
+      sendNoContent(waiter.res);
     }
   }
 }
@@ -350,6 +398,8 @@ async function writeJobStatus(job) {
     status: job.status,
     exitCode: null,
     command: job.command,
+    workerIp: job.workerIp || null,
+    workerName: job.workerName || null,
     createdAt: job.createdAt || null,
     startedAt: job.startedAt || null,
     finishedAt: null,
@@ -367,6 +417,7 @@ async function readJobResult(jobId) {
 
 async function listJobs() {
   await ensureJobDirs();
+
   const entries = await fs.readdir(jobResultsDir, { withFileTypes: true }).catch(() => []);
   const activeJobs = await listActiveJobs();
   const activeJobIds = new Set(activeJobs.map((job) => job.jobId));
@@ -383,6 +434,7 @@ async function listJobs() {
     }
 
     const job = JSON.parse(body);
+
     jobs.push({
       ...job,
       active: activeJobIds.has(job.jobId)
@@ -403,6 +455,7 @@ async function readLatestActiveJob() {
 
 async function syncLatestActiveJob() {
   const activeJob = await readLatestActiveJob();
+
   if (!activeJob) {
     await removeIfExists(latestJobFile);
     await removeIfExists(latestCommandFile);
@@ -416,6 +469,7 @@ async function syncLatestActiveJob() {
     status: activeJob.status,
     command: activeJob.command
   });
+
   await writeJsonFile(latestCommandFile, activeJob.command);
 }
 
@@ -426,6 +480,7 @@ async function findActiveDuplicateJob(command) {
 
 async function listActiveJobs() {
   await ensureJobDirs();
+
   const jobs = [];
 
   for (const dir of [runningJobsDir, queuedJobsDir]) {
@@ -461,17 +516,31 @@ function commandsEqual(left, right) {
 
 async function checkDomain(domainUrl) {
   const url = normalizeUrl(String(domainUrl || ''));
+
   if (!/^https?:\/\/[^ "]+$/i.test(url)) {
-    return { ok: false, status: 0, message: 'Invalid URL.' };
+    return {
+      ok: false,
+      status: 0,
+      message: 'Invalid URL.'
+    };
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
-    let response = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: controller.signal });
+    let response = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal
+    });
+
     if ([405, 403].includes(response.status)) {
-      response = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal });
+      response = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal
+      });
     }
 
     return {
@@ -497,6 +566,7 @@ function normalizeUrl(value) {
 
 function resolveReportUrl(command) {
   const brand = String(command?.brand || '').trim().toLowerCase();
+
   if (!/^[a-z0-9-]+$/.test(brand)) {
     return null;
   }
@@ -524,6 +594,48 @@ async function ensureJobDirs() {
   ]);
 }
 
+async function startWorkersBat() {
+  try {
+    await fs.access(startWorkersBatPath);
+  } catch {
+    return {
+      statusCode: 404,
+      body: {
+        ok: false,
+        error: `BAT file not found: ${startWorkersBatPath}`
+      }
+    };
+  }
+
+  try {
+    const child = spawn('cmd.exe', ['/c', startWorkersBatPath], {
+      cwd: path.dirname(startWorkersBatPath),
+      detached: true,
+      windowsHide: false,
+      stdio: 'ignore'
+    });
+
+    child.unref();
+
+    return {
+      statusCode: 200,
+      body: {
+        ok: true,
+        message: 'start-workers.bat started',
+        file: startWorkersBatPath
+      }
+    };
+  } catch (error) {
+    return {
+      statusCode: 500,
+      body: {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
+}
+
 async function writeJsonFile(filePath, payload) {
   const tempPath = `${filePath}.${process.pid}.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`;
   await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
@@ -540,6 +652,7 @@ async function removeIfExists(filePath) {
 
 function formatJobStamp(date) {
   const pad = (value) => String(value).padStart(2, '0');
+
   return [
     date.getFullYear(),
     pad(date.getMonth() + 1),
@@ -553,6 +666,13 @@ function formatJobStamp(date) {
 
 function sendJson(res, status, payload) {
   return send(res, status, JSON.stringify(payload), 'application/json; charset=utf-8');
+}
+
+function sendNoContent(res) {
+  res.writeHead(204, {
+    'cache-control': 'no-store'
+  });
+  res.end();
 }
 
 function send(res, status, body, contentType) {

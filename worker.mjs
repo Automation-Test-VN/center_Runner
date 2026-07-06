@@ -6,12 +6,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 const defaultTestRepoRoot = path.resolve(__dirname, '..', 'TS_PW_FBC');
 const testRepoRoot = path.resolve(process.env.CENTER_RUNNER_TEST_REPO || defaultTestRepoRoot);
+
 const jobsDir = path.join(__dirname, 'jobs');
 const defaultCommandFile = path.join(jobsDir, 'latest-command.json');
 const defaultStateFile = path.join(jobsDir, 'worker-state.json');
 const defaultResultFile = path.join(jobsDir, 'latest-result.json');
+
+const centerRunnerPort = process.env.CENTER_RUNNER_PORT || '4317';
+const centerRunnerIp = process.env.CENTER_RUNNER_IP || '';
+const centerRunnerBaseUrl = normalizeBaseUrl(
+    process.env.CENTER_RUNNER_BASE_URL ||
+    (centerRunnerIp ? `http://${centerRunnerIp}:${centerRunnerPort}` : '')
+);
+
+const workerIp = process.env.WORKER_IP || '127.0.0.1';
+const workerName = process.env.WORKER_NAME || `worker-${workerIp.replaceAll('.', '-')}`;
 
 const options = parseArgs(process.argv.slice(2));
 
@@ -22,6 +34,11 @@ main().catch((error) => {
 
 async function main() {
   await fsp.mkdir(jobsDir, { recursive: true });
+
+  console.log(`[CenterWorker] Worker name: ${workerName}`);
+  console.log(`[CenterWorker] Worker IP: ${workerIp}`);
+  console.log(`[CenterWorker] Test repo: ${testRepoRoot}`);
+  console.log(`[CenterWorker] Source: ${options.source}`);
 
   if (options.once) {
     const processed = await processLatestCommand();
@@ -38,6 +55,7 @@ async function main() {
 
 async function processLatestCommand() {
   const job = await readJob(options.source);
+
   if (!job) {
     console.log('[CenterWorker] No queued job.');
     return false;
@@ -60,6 +78,7 @@ async function processLatestCommand() {
   }
 
   const startedAt = new Date().toISOString();
+
   console.log(`[CenterWorker] Running ${runner.command} ${runner.args.join(' ')}`);
 
   const result = spawnSync(runner.command, runner.args, {
@@ -76,6 +95,9 @@ async function processLatestCommand() {
   const jobResult = {
     jobIdentity: job.identity,
     jobId: job.identity,
+    workerIp,
+    workerName,
+    testRepoRoot,
     command: job.command,
     status,
     exitCode,
@@ -88,6 +110,8 @@ async function processLatestCommand() {
 
   await writeJson(options.stateFile, {
     lastJobIdentity: job.identity,
+    workerIp,
+    workerName,
     updatedAt: finishedAt
   });
 
@@ -101,28 +125,43 @@ async function processLatestCommand() {
 
 async function readJob(source) {
   if (/^https?:\/\//i.test(source)) {
-    const response = await fetch(source, { headers: { accept: 'application/json' } });
+    const requestUrl = buildNextJobUrl(source);
+
+    const response = await fetch(requestUrl, {
+      headers: {
+        accept: 'application/json'
+      }
+    });
+
     if (response.status === 204 || response.status === 404) {
       return null;
     }
 
     if (!response.ok) {
-      throw new Error(`Cannot read command from ${source}: HTTP ${response.status}`);
+      const body = await response.text().catch(() => '');
+      throw new Error(`Cannot read command from ${requestUrl}: HTTP ${response.status} ${body}`);
     }
 
     const rawJob = await response.json();
     const command = normalizeCommand(rawJob);
+
     return {
-      identity: String(rawJob?.jobId || hashCommand(command)),
+      identity: String(rawJob?.jobId || rawJob?.id || hashCommand(command)),
       command
     };
   }
 
   const sourcePath = path.resolve(__dirname, source);
+
+  if (!fs.existsSync(sourcePath)) {
+    return null;
+  }
+
   const [raw, stats] = await Promise.all([
     fsp.readFile(sourcePath, 'utf8'),
     fsp.stat(sourcePath)
   ]);
+
   const rawJob = JSON.parse(raw);
   const command = normalizeCommand(rawJob);
 
@@ -138,6 +177,7 @@ async function reportCompletion(source, result) {
   }
 
   const completeUrl = new URL('/api/jobs/complete', source).toString();
+
   const response = await fetch(completeUrl, {
     method: 'POST',
     headers: {
@@ -155,8 +195,8 @@ async function reportCompletion(source, result) {
 
 function normalizeCommand(rawCommand) {
   const command = rawCommand?.command && typeof rawCommand.command === 'object'
-    ? rawCommand.command
-    : rawCommand;
+      ? rawCommand.command
+      : rawCommand;
 
   return {
     tool: String(command?.tool || '').trim(),
@@ -171,7 +211,13 @@ function buildRunner(command) {
 
   return {
     command: process.execPath,
-    args: [path.join(testRepoRoot, 'scripts', 'run-domain-test.mjs'), command.group, command.brand, '--grep', command.tag]
+    args: [
+      path.join(testRepoRoot, 'scripts', 'run-domain-test.mjs'),
+      command.group,
+      command.brand,
+      '--grep',
+      command.tag
+    ]
   };
 }
 
@@ -193,9 +239,36 @@ function validateCommand(command) {
   }
 
   const testDir = path.join(testRepoRoot, 'tests', command.group, command.brand);
+
   if (!fs.existsSync(testDir)) {
     throw new Error(`Test path not found: ${path.relative(testRepoRoot, testDir)}`);
   }
+}
+
+function buildNextJobUrl(source) {
+  const url = new URL(source);
+
+  if (!url.searchParams.has('workerIp')) {
+    url.searchParams.set('workerIp', workerIp);
+  }
+
+  if (!url.searchParams.has('workerName')) {
+    url.searchParams.set('workerName', workerName);
+  }
+
+  return url.toString();
+}
+
+function getDefaultCommandSource() {
+  if (centerRunnerBaseUrl) {
+    return `${centerRunnerBaseUrl}/api/jobs/next`;
+  }
+
+  return defaultCommandFile;
+}
+
+function normalizeBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
 }
 
 async function readPreviousIdentity(stateFile) {
@@ -213,13 +286,13 @@ async function writeJson(filePath, payload) {
 
 function hashCommand(command) {
   return createHash('sha256')
-    .update(JSON.stringify(command))
-    .digest('hex');
+      .update(JSON.stringify(command))
+      .digest('hex');
 }
 
 function parseArgs(rawArgs) {
   const parsed = {
-    source: process.env.CENTER_RUNNER_COMMAND_SOURCE || defaultCommandFile,
+    source: process.env.CENTER_RUNNER_COMMAND_SOURCE || getDefaultCommandSource(),
     stateFile: process.env.CENTER_RUNNER_STATE_FILE || defaultStateFile,
     resultFile: process.env.CENTER_RUNNER_RESULT_FILE || defaultResultFile,
     intervalMs: Number(process.env.CENTER_RUNNER_INTERVAL_MS || 5000),
@@ -229,8 +302,10 @@ function parseArgs(rawArgs) {
 
   for (let index = 0; index < rawArgs.length; index += 1) {
     const arg = rawArgs[index];
+
     const next = () => {
       const value = rawArgs[index + 1];
+
       if (!value || value.startsWith('--')) {
         throw new Error(`Missing value for ${arg}`);
       }
@@ -292,7 +367,7 @@ Usage:
 Examples:
   npm run worker -- --once --dry-run
   npm run worker -- --once
-  npm run worker -- --source http://localhost:4317/api/jobs/next
+  npm run worker -- --source http://100.67.96.22:4317/api/jobs/next
 `.trim());
 }
 
