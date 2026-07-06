@@ -8,13 +8,41 @@ description: Build or extend the TS_PW_FBC Center Runner web control panel that 
 ## Workflow
 
 1. Inspect `scripts/run-domain-test.mjs`, `src/base/BaseSetup.ts`, `playwright.config.ts`, and nearby config before changing runner behavior.
-2. Keep the web tool isolated under `tools/center-runner` unless the user asks to integrate it into the main framework.
-3. Persist user requests as JSON commands first; let a separate runner process consume those commands later.
+2. Keep the web tool isolated under `tools/center-runner` (or in its dedicated repository) unless the user asks to integrate it into the main framework.
+3. Follow the established **OOP** (Object-Oriented Programming) and **POM** (Page Object Model) architectures. Do not add procedural global variables or helper functions.
 4. Treat `tool`, `group`, `brand`, and `tag` as the required Alive Daily command fields.
 5. Do not log passwords in terminal output, browser UI summaries, job ids, or saved preview text. If credentials must be stored for a future manual tool prototype, mark it clearly and keep it local-only.
 6. Reuse the repository runner command shape: `npm run test -- <fbc-group> <domain> [playwright args...]`.
 7. Preserve one independent spec file per domain. Do not merge domain specs into a cross-domain spec for runner convenience.
 8. After TypeScript changes, run `npm run check`. For static HTML/CSS/JS server-only changes, run the local server smoke check instead.
+
+## Codebase Architecture (OOP & POM Standards)
+
+All new features and modifications must adhere to the following class structure:
+
+### Common Layer
+* `Config`: Encapsulates environments, directories, port, host, and path resolutions.
+* `Job`: Represents the Job domain model, validation, and JSON serialization state.
+
+### Server Layer (`src/server/`)
+* `JobManager`: Core manager handling reading, writing, claiming, and completing jobs on the filesystem.
+* `DomainChecker`: Lightweight HTTP HEAD/GET request domain preflight reachability helper.
+* `WorkerRegistry`: Manages worker long-polling queues, timeouts, and callbacks.
+* `Server`: Integrates routing, serving static files, APIs, and HTTP server lifecycle.
+
+### Worker Layer (`src/worker/`)
+* `WorkerConfig`: Parses CLI arguments and config overrides.
+* `JobFetcher`: Retrieves jobs from URLs or JSON files.
+* `JobRunner`: Validates commands and spawns Playwright test executions.
+* `Worker`: Orchestrates the worker's polling loop, state updates, and result submissions.
+
+### Frontend Page Object Model (`public/app.js`)
+The UI is divided into page/view component classes:
+* `RunnerForm`: Controls inputs, options syncing, and submit validation.
+* `JobTable`: Renders dynamic rows of recent and running tests.
+* `JobSummary`: Updates the control panel header indicators.
+* `ReportViewer`: Embeds and clears Playwright HTML reports.
+* `AppController`: Coordinates interactions, fetching configurations, and API polling.
 
 ## Domain Alive Behavior
 
