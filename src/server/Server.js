@@ -13,7 +13,7 @@ class Server {
     this.domainChecker = new DomainChecker();
     this.workerRegistry = new WorkerRegistry();
     this.server = null;
-    
+
     this.contentTypes = new Map([
       ['.html', 'text/html; charset=utf-8'],
       ['.css', 'text/css; charset=utf-8'],
@@ -32,109 +32,120 @@ class Server {
       try {
         await this.handleRequest(req, res);
       } catch (error) {
-        this.sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        this.sendJson(res, 500, {
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
     });
 
     this.server.listen(config.port, config.host, () => {
-      console.log(`Center Runner listening on http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`);
+      const displayHost = config.host === '0.0.0.0' ? 'localhost' : config.host;
+      console.log(`Center Runner listening on http://${displayHost}:${config.port}`);
       console.log(`Center Runner host binding: ${config.host}:${config.port}`);
+      console.log(`Center Runner root: ${config.rootDir}`);
       console.log(`Test repo root: ${config.testRepoRoot}`);
-      console.log(`Start workers BAT: ${config.startWorkersBatPath}`);
+      console.log(`Jobs queue dir: ${config.queuedJobsDir}`);
+      console.log(`Jobs running dir: ${config.runningJobsDir}`);
+      console.log(`Jobs results dir: ${config.jobResultsDir}`);
     });
   }
 
   async handleRequest(req, res) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
-    // POST /api/workers/start
     if (req.method === 'POST' && url.pathname === '/api/workers/start') {
       const result = await this.startWorkersBat();
       return this.sendJson(res, result.statusCode, result.body);
     }
 
-    // POST /api/jobs
     if (req.method === 'POST' && url.pathname === '/api/jobs') {
       const payload = await this.readJson(req);
+
       try {
         const job = await this.jobManager.addJob(payload);
-        await this.workerRegistry.notify(this.jobManager);
-        return this.sendJson(res, 201, job.toActiveJSON());
+
+        await this.workerRegistry.notifyAll(this.jobManager);
+
+        return this.sendJson(res, 201, job);
       } catch (error) {
-        if (error.message.includes('already')) {
-          return this.sendJson(res, 409, { error: error.message });
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (message.toLowerCase().includes('already')) {
+          return this.sendJson(res, 409, { error: message });
         }
-        return this.sendJson(res, 400, { error: error.message });
+
+        return this.sendJson(res, 400, { error: message });
       }
     }
 
-    // POST /api/jobs/complete
     if (req.method === 'POST' && url.pathname === '/api/jobs/complete') {
       const payload = await this.readJson(req);
       const result = await this.jobManager.completeJob(payload);
       return this.sendJson(res, 200, result);
     }
 
-    // POST /api/check-domain
     if (req.method === 'POST' && url.pathname === '/api/check-domain') {
       const payload = await this.readJson(req);
       const result = await this.domainChecker.check(payload.domainUrl);
       return this.sendJson(res, 200, result);
     }
 
-    // GET /api/jobs/latest
     if (req.method === 'GET' && url.pathname === '/api/jobs/latest') {
       const body = await fs.readFile(config.latestCommandFile, 'utf8').catch(() => null);
-      return body ? this.send(res, 200, body, 'application/json; charset=utf-8') : this.sendJson(res, 404, { error: 'No command has been saved yet.' });
+      return body
+        ? this.send(res, 200, body, 'application/json; charset=utf-8')
+        : this.sendJson(res, 404, { error: 'No command has been saved yet.' });
     }
 
-    // GET /api/jobs/latest-job
     if (req.method === 'GET' && url.pathname === '/api/jobs/latest-job') {
       const job = await this.jobManager.readLatestActiveJob();
-      return job ? this.sendJson(res, 200, job) : this.sendJson(res, 404, { error: 'No active job has been saved yet.' });
+      return job
+        ? this.sendJson(res, 200, job)
+        : this.sendJson(res, 404, { error: 'No active job has been saved yet.' });
     }
 
-    // GET /api/jobs/next
     if (req.method === 'GET' && url.pathname === '/api/jobs/next') {
-      const workerIp = url.searchParams.get('workerIp') || null;
+      const workerIp = url.searchParams.get('workerIp') || req.socket.remoteAddress || null;
       const workerName = url.searchParams.get('workerName') || null;
+
       const claimedJob = await this.jobManager.claimNextJob(workerIp, workerName);
+
       if (claimedJob) {
         return this.sendJson(res, 200, claimedJob);
       }
+
       return this.workerRegistry.add(res, this.jobManager, workerIp, workerName);
     }
 
-    // GET /api/jobs/latest-result
     if (req.method === 'GET' && url.pathname === '/api/jobs/latest-result') {
       const body = await fs.readFile(config.latestResultFile, 'utf8').catch(() => null);
-      return body ? this.send(res, 200, body, 'application/json; charset=utf-8') : this.sendJson(res, 404, { error: 'No result has been saved yet.' });
+      return body
+        ? this.send(res, 200, body, 'application/json; charset=utf-8')
+        : this.sendJson(res, 404, { error: 'No result has been saved yet.' });
     }
 
-    // GET /api/jobs
     if (req.method === 'GET' && url.pathname === '/api/jobs') {
       const jobs = await this.jobManager.listJobs();
       return this.sendJson(res, 200, { jobs });
     }
 
-    // GET /api/brands
     if (req.method === 'GET' && url.pathname === '/api/brands') {
       const groups = await this.collectBrandGroups();
       return this.sendJson(res, 200, { groups });
     }
 
-    // GET /api/jobs/:id/result
     const jobResultMatch = url.pathname.match(/^\/api\/jobs\/(CR-\d{8}-\d{6}-[A-Z0-9]{4})\/result$/);
     if (req.method === 'GET' && jobResultMatch) {
       const result = await this.jobManager.readJobResult(jobResultMatch[1]);
-      return result ? this.sendJson(res, 200, result) : this.sendJson(res, 404, { error: 'No result found for job.' });
+      return result
+        ? this.sendJson(res, 200, result)
+        : this.sendJson(res, 404, { error: 'No result found for job.' });
     }
 
     if (req.method !== 'GET') {
       return this.sendJson(res, 405, { error: 'Method not allowed.' });
     }
 
-    // Serve Reports static files
     if (url.pathname.startsWith('/reports/')) {
       const reportPath = this.resolveReportPath(url.pathname);
       if (!reportPath) {
@@ -145,10 +156,15 @@ class Server {
       if (!body) {
         return this.sendJson(res, 404, { error: 'Report file read error.' });
       }
-      return this.send(res, 200, body, this.contentTypes.get(path.extname(reportPath).toLowerCase()) || 'application/octet-stream');
+
+      return this.send(
+        res,
+        200,
+        body,
+        this.contentTypes.get(path.extname(reportPath).toLowerCase()) || 'application/octet-stream'
+      );
     }
 
-    // Serve Static public files
     const filePath = this.resolveStaticPath(url.pathname);
     if (!filePath) {
       return this.sendJson(res, 404, { error: 'Not found.' });
@@ -158,14 +174,22 @@ class Server {
     if (!body) {
       return this.sendJson(res, 404, { error: 'Static file read error.' });
     }
-    return this.send(res, 200, body, this.contentTypes.get(path.extname(filePath).toLowerCase()) || 'application/octet-stream');
+
+    return this.send(
+      res,
+      200,
+      body,
+      this.contentTypes.get(path.extname(filePath).toLowerCase()) || 'application/octet-stream'
+    );
   }
 
   async readJson(req) {
     const chunks = [];
+
     for await (const chunk of req) {
       chunks.push(chunk);
     }
+
     const raw = Buffer.concat(chunks).toString('utf8');
     return raw ? JSON.parse(raw) : {};
   }
@@ -181,12 +205,16 @@ class Server {
 
       const groupPath = path.join(config.testsDir, entry.name);
       const brandEntries = await fs.readdir(groupPath, { withFileTypes: true }).catch(() => []);
+
       const brands = brandEntries
         .filter((brandEntry) => brandEntry.isDirectory() && /^[a-z0-9-]+$/.test(brandEntry.name))
         .map((brandEntry) => brandEntry.name)
         .sort((a, b) => a.localeCompare(b));
 
-      groups.push({ name: entry.name, brands });
+      groups.push({
+        name: entry.name,
+        brands
+      });
     }
 
     return groups.sort((a, b) => a.name.localeCompare(b.name));
@@ -206,10 +234,6 @@ class Server {
     return filePath.startsWith(config.publicDir) ? filePath : null;
   }
 
-  sendJson(res, status, payload) {
-    return this.send(res, status, JSON.stringify(payload), 'application/json; charset=utf-8');
-  }
-
   async startWorkersBat() {
     try {
       await fs.access(config.startWorkersBatPath);
@@ -218,7 +242,8 @@ class Server {
         statusCode: 404,
         body: {
           ok: false,
-          error: `BAT file not found: ${config.startWorkersBatPath}`
+          error: `BAT file not found: ${config.startWorkersBatPath}`,
+          note: 'Remote workers should normally be started directly on worker machines using jenkins/start-workers.bat.'
         }
       };
     }
@@ -252,11 +277,16 @@ class Server {
     }
   }
 
+  sendJson(res, status, payload) {
+    return this.send(res, status, JSON.stringify(payload), 'application/json; charset=utf-8');
+  }
+
   send(res, status, body, contentType) {
     res.writeHead(status, {
       'content-type': contentType,
       'cache-control': 'no-store'
     });
+
     res.end(body);
   }
 }
