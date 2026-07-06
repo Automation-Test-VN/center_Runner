@@ -2,12 +2,63 @@
 
 Standalone web queue and worker for running TS_PW_FBC domain tests.
 
-## Layout
+## Codebase Layout
 
-- `server.mjs`: web server, job API, report static server.
-- `worker.mjs`: worker process that waits for jobs and executes the test repo runner.
-- `public/`: Center Runner UI.
-- `.codex/skills/center-runner-web/`: AI skill/instructions for this tool.
+* [server.mjs](file:///d:/workspace/center_Runner/server.mjs): Entrypoint for bootstrapping the Server.
+* [worker.mjs](file:///d:/workspace/center_Runner/worker.mjs): Entrypoint for starting the Worker daemon.
+* [src/](file:///d:/workspace/center_Runner/src/): Core OOP modules split into layers:
+  * [common/Config.js](file:///d:/workspace/center_Runner/src/common/Config.js): Configuration and path setup.
+  * [common/Job.js](file:///d:/workspace/center_Runner/src/common/Job.js): Job model and serialization.
+  * [server/Server.js](file:///d:/workspace/center_Runner/src/server/Server.js): HTTP router and static report server.
+  * [server/JobManager.js](file:///d:/workspace/center_Runner/src/server/JobManager.js): Filesystem job queue and result storage manager.
+  * [server/DomainChecker.js](file:///d:/workspace/center_Runner/src/server/DomainChecker.js): Preflight domain checking.
+  * [server/WorkerRegistry.js](file:///d:/workspace/center_Runner/src/server/WorkerRegistry.js): Workers queue and long polling manager.
+  * [worker/Worker.js](file:///d:/workspace/center_Runner/src/worker/Worker.js): Worker loop orchestrator.
+  * [worker/WorkerConfig.js](file:///d:/workspace/center_Runner/src/worker/WorkerConfig.js): Worker CLI argument parsing.
+  * [worker/JobFetcher.js](file:///d:/workspace/center_Runner/src/worker/JobFetcher.js): Job retriever (URL/File).
+  * [worker/JobRunner.js](file:///d:/workspace/center_Runner/src/worker/JobRunner.js): Playwright runner validation and child process spawner.
+* [public/](file:///d:/workspace/center_Runner/public/): Frontend UI files, using Page Object Model (POM) in [app.js](file:///d:/workspace/center_Runner/public/app.js).
+* [.codex/skills/center-runner-web/](file:///d:/workspace/center_Runner/.codex/skills/center-runner-web/): AI guidelines for center runner.
+
+## Core Flows & Architecture
+
+The codebase operates on an OOP/POM event-driven file queue. The core responsibilities are mapped as follows:
+
+### 1. Server Initialization (Khởi tạo Server)
+* **Files involved**: [server.mjs](file:///d:/workspace/center_Runner/server.mjs), [Server.js](file:///d:/workspace/center_Runner/src/server/Server.js), [Config.js](file:///d:/workspace/center_Runner/src/common/Config.js)
+* **Flow**:
+  * Running `npm run start` runs `server.mjs`, which instantiates and starts the `Server` class.
+  * The server reads environment configurations from `Config` and starts listening on the designated host and port (default `0.0.0.0:4317`).
+  * On startup, it ensures directories (`jobs/queue`, `jobs/running`, `jobs/results`) exist.
+
+### 2. Task Creation (Tạo task)
+* **Files involved**: [app.js](file:///d:/workspace/center_Runner/public/app.js) (`RunnerForm`, `AppController`), [Server.js](file:///d:/workspace/center_Runner/src/server/Server.js) (`POST /api/jobs`), [JobManager.js](file:///d:/workspace/center_Runner/src/server/JobManager.js) (`addJob()`), [Job.js](file:///d:/workspace/center_Runner/src/common/Job.js)
+* **Flow**:
+  * The user fills out parameters in the browser form and clicks **Start**; `RunnerForm` captures inputs and `AppController` makes a POST request to `/api/jobs`.
+  * The server parses this request, instantiates a `Job`, checks for active duplicate jobs, saves the job definition to `jobs/queue/<jobId>.json`, and triggers `WorkerRegistry.notify()` to alert any waiting workers.
+
+### 3. Task Receiving (Nhận task)
+* **Files involved**: [Server.js](file:///d:/workspace/center_Runner/src/server/Server.js) (`GET /api/jobs/next`), [WorkerRegistry.js](file:///d:/workspace/center_Runner/src/server/WorkerRegistry.js), [JobFetcher.js](file:///d:/workspace/center_Runner/src/worker/JobFetcher.js), [JobManager.js](file:///d:/workspace/center_Runner/src/server/JobManager.js) (`claimNextJob()`)
+* **Flow**:
+  * The worker calls `JobFetcher.fetchJob()` pointing to `/api/jobs/next`.
+  * If a job is queued, `JobManager.claimNextJob()` moves the JSON file from `jobs/queue/` to `jobs/running/`, sets its status to `RUNNING`, and returns the job to the worker.
+  * If the queue is empty, `WorkerRegistry` holds the request connection open (long-polling) with a timeout of 60 seconds until a new job is added.
+
+### 4. Task Running (Chạy task)
+* **Files involved**: [worker.mjs](file:///d:/workspace/center_Runner/worker.mjs), [Worker.js](file:///d:/workspace/center_Runner/src/worker/Worker.js), [JobRunner.js](file:///d:/workspace/center_Runner/src/worker/JobRunner.js)
+* **Flow**:
+  * Once the worker fetches a job, `Worker.js` verifies it and calls `JobRunner.run()`.
+  * `JobRunner` validates arguments and executes Playwright tests via `spawnSync` using `scripts/run-domain-test.mjs` located in the sibling `TS_PW_FBC` workspace.
+  * When execution finishes, `Worker.js` posts results (`DONE` or `FAILED`) back to the server via `POST /api/jobs/complete`.
+  * The server's `JobManager.completeJob()` updates the job status JSON, moves it to `jobs/results/`, deletes the temporary queue/running files, and syncs the active job state.
+
+### 5. Report Importing & Displaying (Import & Xem Report)
+* **Files involved**: [Server.js](file:///d:/workspace/center_Runner/src/server/Server.js) (`GET /reports/*`), [app.js](file:///d:/workspace/center_Runner/public/app.js) (`ReportViewer`, `JobTable`), [Config.js](file:///d:/workspace/center_Runner/src/common/Config.js)
+* **Flow**:
+  * Playwright saves kịch bản test results directly to `TS_PW_FBC/test-results/<brand>/report.html`.
+  * The server routes any requests under `/reports/*` to serve these HTML assets statically from `Config.testResultsDir`.
+  * When a job completes, the UI `JobTable` renders an **Open** button which maps to `ReportViewer.load()`, embedding the static report inside the preview iframe.
+
 
 ## Configure
 

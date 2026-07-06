@@ -1,282 +1,374 @@
-const form = document.querySelector('#runner-form');
-const toolInput = document.querySelector('#tool-name');
-const groupInput = document.querySelector('#group-name');
-const brandInput = document.querySelector('#brand-name');
-const domainInput = document.querySelector('#domain-url');
-const usernameInput = document.querySelector('#username');
-const passwordInput = document.querySelector('#password');
-const reportFrame = document.querySelector('#report-frame');
-const jobIdLabel = document.querySelector('#job-id');
-const groupLabel = document.querySelector('#group-label');
-const brandLabel = document.querySelector('#brand-label');
-const statusLabel = document.querySelector('#status-label');
-const aliveNote = document.querySelector('#alive-note');
-const startButton = document.querySelector('.start-button');
-const jobList = document.querySelector('#job-list');
+/**
+ * Page Object Model (POM) and Object-Oriented Programming (OOP) Refactored Frontend UI
+ */
 
-let brandGroups = [];
-let jobPollTimer = null;
+class RunnerForm {
+  constructor(formSelector, onSubmit) {
+    this.form = document.querySelector(formSelector);
+    this.toolInput = this.form.querySelector('#tool-name');
+    this.groupInput = this.form.querySelector('#group-name');
+    this.brandInput = this.form.querySelector('#brand-name');
+    this.domainInput = this.form.querySelector('#domain-url');
+    this.usernameInput = this.form.querySelector('#username');
+    this.passwordInput = this.form.querySelector('#password');
+    this.startButton = this.form.querySelector('.start-button');
+    
+    this.brandGroups = [];
+    this.onSubmit = onSubmit;
 
-loadBrandGroups();
-loadJobs();
-startJobPolling();
-syncToolState();
-clearReportFrame();
+    this.initEvents();
+    this.syncToolState();
+  }
 
-toolInput.addEventListener('change', syncToolState);
-groupInput.addEventListener('change', syncBrandOptions);
-brandInput.addEventListener('change', syncLabels);
-
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  await startJob();
-});
-
-async function startJob() {
-  setStatus('QUEUING');
-  setStartButtonState('QUEUING');
-  aliveNote.textContent = '';
-
-  try {
-    const job = await postJson('/api/jobs', {
-      tool: toolInput.value,
-      group: groupInput.value,
-      brand: brandInput.value,
-      tag: '@smoke',
-      domainUrl: domainInput.value,
-      username: usernameInput.value,
-      password: passwordInput.value
+  initEvents() {
+    this.toolInput.addEventListener('change', () => this.syncToolState());
+    this.groupInput.addEventListener('change', () => this.syncBrandOptions());
+    
+    this.form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (this.onSubmit) {
+        await this.onSubmit(this.getValues());
+      }
     });
-
-    jobIdLabel.textContent = job.jobId;
-    groupLabel.textContent = job.command.group;
-    brandLabel.textContent = job.command.brand;
-    setStatus(job.status);
-    aliveNote.textContent = `Queued ${job.command.group}/${job.command.brand}`;
-    await loadJobs();
-  } catch (error) {
-    setStatus('FAILED');
-    aliveNote.textContent = error instanceof Error ? error.message : String(error);
-  } finally {
-    setStartButtonState('IDLE');
   }
-}
 
-function startJobPolling() {
-  stopJobPolling();
-  jobPollTimer = window.setInterval(loadJobs, 3000);
-}
-
-function stopJobPolling() {
-  if (jobPollTimer) {
-    window.clearInterval(jobPollTimer);
-    jobPollTimer = null;
+  getValues() {
+    return {
+      tool: this.toolInput.value,
+      group: this.groupInput.value,
+      brand: this.brandInput.value,
+      tag: '@smoke',
+      domainUrl: this.domainInput.value,
+      username: this.usernameInput.value,
+      password: this.passwordInput.value
+    };
   }
-}
 
-async function loadJobs() {
-  try {
-    const response = await fetch('/api/jobs');
-    if (!response.ok) {
-      throw new Error(`Request failed with HTTP ${response.status}.`);
+  setBrandGroups(groups) {
+    this.brandGroups = groups;
+    this.renderGroupOptions();
+    this.syncBrandOptions();
+  }
+
+  renderGroupOptions() {
+    this.groupInput.innerHTML = '';
+    for (const group of this.brandGroups) {
+      const option = document.createElement('option');
+      option.value = group.name;
+      option.textContent = group.name;
+      this.groupInput.append(option);
     }
 
-    const data = await response.json();
-    const jobs = Array.isArray(data.jobs) ? data.jobs : [];
-    renderJobs(jobs);
-    syncJobSummary(jobs);
-  } catch (error) {
-    aliveNote.textContent = error instanceof Error ? error.message : String(error);
+    if (this.brandGroups.some((group) => group.name === 'fbc1')) {
+      this.groupInput.value = 'fbc1';
+    }
+  }
+
+  syncBrandOptions() {
+    const selectedGroup = this.brandGroups.find((group) => group.name === this.groupInput.value);
+    this.brandInput.innerHTML = '';
+
+    for (const brand of selectedGroup?.brands || []) {
+      const option = document.createElement('option');
+      option.value = brand;
+      option.textContent = brand;
+      this.brandInput.append(option);
+    }
+
+    if (selectedGroup?.brands.includes('mayman')) {
+      this.brandInput.value = 'mayman';
+    }
+
+    // Trigger standard custom event to notify parent of changes
+    this.brandInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  syncToolState() {
+    const usesFrameworkConfig = this.toolInput.value === 'aliveDaily';
+    this.domainInput.disabled = usesFrameworkConfig;
+    this.usernameInput.disabled = usesFrameworkConfig;
+    this.passwordInput.disabled = usesFrameworkConfig;
+    
+    if (usesFrameworkConfig) {
+      this.domainInput.value = '';
+      this.usernameInput.value = '';
+      this.passwordInput.value = '';
+    }
+  }
+
+  setStartButtonState(status) {
+    const normalizedStatus = String(status || '').toUpperCase();
+    const isBusy = normalizedStatus === 'QUEUING';
+    this.startButton.disabled = isBusy;
+    this.startButton.textContent = isBusy ? 'Adding...' : 'Start';
+    this.startButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+  }
+
+  onBrandChange(callback) {
+    this.brandInput.addEventListener('change', () => {
+      callback(this.groupInput.value, this.brandInput.value);
+    });
   }
 }
 
-function renderJobs(jobs) {
-  jobList.innerHTML = '';
+class JobTable {
+  constructor(tableBodySelector) {
+    this.tableBody = document.querySelector(tableBodySelector);
+  }
 
-  if (jobs.length === 0) {
-    const row = document.createElement('tr');
+  render(jobs, onOpenReport) {
+    this.tableBody.innerHTML = '';
+
+    if (jobs.length === 0) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 7;
+      cell.textContent = 'No jobs yet.';
+      row.append(cell);
+      this.tableBody.append(row);
+      return;
+    }
+
+    for (const job of jobs) {
+      const row = document.createElement('tr');
+      row.dataset.status = job.status || 'IDLE';
+
+      row.append(
+        this.tableCell(job.jobId || '-'),
+        this.tableCell(job.command?.group || '-'),
+        this.tableCell(job.command?.brand || '-'),
+        this.statusCell(job.status || '-'),
+        this.tableCell(Number.isInteger(job.exitCode) ? String(job.exitCode) : '-'),
+        this.tableCell(this.formatTime(job.createdAt || job.startedAt || job.finishedAt)),
+        this.reportCell(job, onOpenReport)
+      );
+
+      this.tableBody.append(row);
+    }
+  }
+
+  tableCell(value) {
     const cell = document.createElement('td');
-    cell.colSpan = 7;
-    cell.textContent = 'No jobs yet.';
-    row.append(cell);
-    jobList.append(row);
-    return;
-  }
-
-  for (const job of jobs) {
-    const row = document.createElement('tr');
-    row.dataset.status = job.status || 'IDLE';
-
-    row.append(
-      tableCell(job.jobId || '-'),
-      tableCell(job.command?.group || '-'),
-      tableCell(job.command?.brand || '-'),
-      statusCell(job.status || '-'),
-      tableCell(Number.isInteger(job.exitCode) ? String(job.exitCode) : '-'),
-      tableCell(formatTime(job.createdAt || job.startedAt || job.finishedAt)),
-      reportCell(job)
-    );
-
-    jobList.append(row);
-  }
-}
-
-function syncJobSummary(jobs) {
-  const activeJobs = jobs.filter((job) => job.active && ['QUEUED', 'RUNNING'].includes(job.status));
-
-  if (activeJobs.length === 0) {
-    if (statusLabel.textContent === 'QUEUED' || statusLabel.textContent === 'RUNNING') {
-      setStatus('IDLE');
-    }
-
-    return;
-  }
-
-  const runningCount = activeJobs.filter((job) => job.status === 'RUNNING').length;
-  const queuedCount = activeJobs.filter((job) => job.status === 'QUEUED').length;
-  const newest = activeJobs[0];
-
-  jobIdLabel.textContent = newest.jobId || '-';
-  groupLabel.textContent = newest.command?.group || '-';
-  brandLabel.textContent = newest.command?.brand || '-';
-  setStatus(runningCount > 0 ? 'RUNNING' : 'QUEUED');
-  aliveNote.textContent = `Running: ${runningCount} | Queued: ${queuedCount}`;
-}
-
-async function loadBrandGroups() {
-  try {
-    const response = await fetch('/api/brands');
-    const data = await response.json();
-    brandGroups = Array.isArray(data.groups) ? data.groups : [];
-    renderGroupOptions();
-    syncBrandOptions();
-  } catch (error) {
-    aliveNote.textContent = error instanceof Error ? error.message : String(error);
-  }
-}
-
-function renderGroupOptions() {
-  groupInput.innerHTML = '';
-
-  for (const group of brandGroups) {
-    const option = document.createElement('option');
-    option.value = group.name;
-    option.textContent = group.name;
-    groupInput.append(option);
-  }
-
-  if (brandGroups.some((group) => group.name === 'fbc1')) {
-    groupInput.value = 'fbc1';
-  }
-}
-
-function syncBrandOptions() {
-  const selectedGroup = brandGroups.find((group) => group.name === groupInput.value);
-  brandInput.innerHTML = '';
-
-  for (const brand of selectedGroup?.brands || []) {
-    const option = document.createElement('option');
-    option.value = brand;
-    option.textContent = brand;
-    brandInput.append(option);
-  }
-
-  if (selectedGroup?.brands.includes('mayman')) {
-    brandInput.value = 'mayman';
-  }
-
-  syncLabels();
-}
-
-function syncToolState() {
-  const usesFrameworkConfig = toolInput.value === 'aliveDaily';
-  domainInput.disabled = usesFrameworkConfig;
-  usernameInput.disabled = usesFrameworkConfig;
-  passwordInput.disabled = usesFrameworkConfig;
-  domainInput.value = usesFrameworkConfig ? '' : domainInput.value;
-  usernameInput.value = usesFrameworkConfig ? '' : usernameInput.value;
-  passwordInput.value = usesFrameworkConfig ? '' : passwordInput.value;
-}
-
-function syncLabels() {
-  groupLabel.textContent = groupInput.value || '-';
-  brandLabel.textContent = brandInput.value || '-';
-}
-
-function tableCell(value) {
-  const cell = document.createElement('td');
-  cell.textContent = value;
-  return cell;
-}
-
-function statusCell(status) {
-  const cell = tableCell(status);
-  cell.className = `status-${String(status).toLowerCase()}`;
-  return cell;
-}
-
-function reportCell(job) {
-  const cell = document.createElement('td');
-
-  if (!job.reportUrl || !['DONE', 'FAILED'].includes(job.status)) {
-    cell.textContent = '-';
+    cell.textContent = value;
     return cell;
   }
 
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'report-button';
-  button.textContent = 'Open';
-  button.addEventListener('click', () => {
-    reportFrame.src = `${job.reportUrl}?jobId=${encodeURIComponent(job.jobId)}`;
-  });
-  cell.append(button);
-  return cell;
-}
-
-function formatTime(value) {
-  if (!value) {
-    return '-';
+  statusCell(status) {
+    const cell = this.tableCell(status);
+    cell.className = `status-${String(status).toLowerCase()}`;
+    return cell;
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '-';
+  reportCell(job, onOpenReport) {
+    const cell = document.createElement('td');
+    if (!job.reportUrl || !['DONE', 'FAILED'].includes(job.status)) {
+      cell.textContent = '-';
+      return cell;
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'report-button';
+    button.textContent = 'Open';
+    button.addEventListener('click', () => {
+      if (onOpenReport) {
+        onOpenReport(job);
+      }
+    });
+    cell.append(button);
+    return cell;
   }
 
-  return date.toLocaleString();
+  formatTime(value) {
+    if (!value) {
+      return '-';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '-';
+    }
+    return date.toLocaleString();
+  }
 }
 
-function clearReportFrame() {
-  reportFrame.removeAttribute('src');
-}
-
-function setStatus(status) {
-  statusLabel.textContent = status;
-}
-
-function setStartButtonState(status) {
-  const normalizedStatus = String(status || '').toUpperCase();
-  const isBusy = normalizedStatus === 'QUEUING';
-
-  startButton.disabled = isBusy;
-  startButton.textContent = isBusy ? 'Adding...' : 'Start';
-  startButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
-}
-
-async function postJson(url, payload) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || `Request failed with HTTP ${response.status}.`);
+class JobSummary {
+  constructor({ jobIdId, groupId, brandId, statusId, aliveNoteId }) {
+    this.jobIdLabel = document.getElementById(jobIdId);
+    this.groupLabel = document.getElementById(groupId);
+    this.brandLabel = document.getElementById(brandId);
+    this.statusLabel = document.getElementById(statusId);
+    this.aliveNoteLabel = document.getElementById(aliveNoteId);
   }
 
-  return data;
+  update({ jobId, group, brand, status, note }) {
+    if (jobId !== undefined) this.jobIdLabel.textContent = jobId;
+    if (group !== undefined) this.groupLabel.textContent = group;
+    if (brand !== undefined) this.brandLabel.textContent = brand;
+    if (status !== undefined) this.statusLabel.textContent = status;
+    if (note !== undefined) this.aliveNoteLabel.textContent = note;
+  }
+
+  setStatus(status) {
+    this.statusLabel.textContent = status;
+  }
+
+  setAliveNote(note) {
+    this.aliveNoteLabel.textContent = note;
+  }
 }
+
+class ReportViewer {
+  constructor(iframeSelector) {
+    this.iframe = document.querySelector(iframeSelector);
+  }
+
+  load(url, jobId) {
+    this.iframe.src = `${url}?jobId=${encodeURIComponent(jobId)}`;
+  }
+
+  clear() {
+    this.iframe.removeAttribute('src');
+  }
+}
+
+class AppController {
+  constructor() {
+    this.form = new RunnerForm('#runner-form', (values) => this.startJob(values));
+    this.table = new JobTable('#job-list');
+    this.summary = new JobSummary({
+      jobIdId: 'job-id',
+      groupId: 'group-label',
+      brandId: 'brand-label',
+      statusId: 'status-label',
+      aliveNoteId: 'alive-note'
+    });
+    this.reportViewer = new ReportViewer('#report-frame');
+    this.jobPollTimer = null;
+  }
+
+  async initialize() {
+    this.form.onBrandChange((group, brand) => {
+      this.summary.update({ group, brand });
+    });
+
+    await this.loadBrandGroups();
+    await this.loadJobs();
+    this.startJobPolling();
+  }
+
+  async loadBrandGroups() {
+    try {
+      const response = await fetch('/api/brands');
+      if (!response.ok) throw new Error('Failed to load brands');
+      const data = await response.json();
+      const groups = Array.isArray(data.groups) ? data.groups : [];
+      this.form.setBrandGroups(groups);
+    } catch (error) {
+      this.summary.setAliveNote(`Brands Error: ${error.message}`);
+    }
+  }
+
+  async loadJobs() {
+    try {
+      const response = await fetch('/api/jobs');
+      if (!response.ok) {
+        throw new Error(`Request failed with HTTP ${response.status}.`);
+      }
+
+      const data = await response.json();
+      const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      
+      this.table.render(jobs, (job) => {
+        this.reportViewer.load(job.reportUrl, job.jobId);
+      });
+
+      this.syncJobSummary(jobs);
+    } catch (error) {
+      this.summary.setAliveNote(`Jobs Error: ${error.message}`);
+    }
+  }
+
+  syncJobSummary(jobs) {
+    const activeJobs = jobs.filter((job) => job.active && ['QUEUED', 'RUNNING'].includes(job.status));
+
+    if (activeJobs.length === 0) {
+      const currentStatus = document.getElementById('status-label').textContent;
+      if (currentStatus === 'QUEUED' || currentStatus === 'RUNNING') {
+        this.summary.setStatus('IDLE');
+      }
+      return;
+    }
+
+    const runningCount = activeJobs.filter((job) => job.status === 'RUNNING').length;
+    const queuedCount = activeJobs.filter((job) => job.status === 'QUEUED').length;
+    const newest = activeJobs[0];
+
+    this.summary.update({
+      jobId: newest.jobId || '-',
+      group: newest.command?.group || '-',
+      brand: newest.command?.brand || '-',
+      status: runningCount > 0 ? 'RUNNING' : 'QUEUED',
+      note: `Running: ${runningCount} | Queued: ${queuedCount}`
+    });
+  }
+
+  async startJob(values) {
+    this.summary.setStatus('QUEUING');
+    this.form.setStartButtonState('QUEUING');
+    this.summary.setAliveNote('');
+
+    try {
+      const job = await this.postJson('/api/jobs', values);
+
+      this.summary.update({
+        jobId: job.jobId,
+        group: job.command.group,
+        brand: job.command.brand,
+        status: job.status,
+        note: `Queued ${job.command.group}/${job.command.brand}`
+      });
+
+      await this.loadJobs();
+    } catch (error) {
+      this.summary.setStatus('FAILED');
+      this.summary.setAliveNote(error.message);
+    } finally {
+      this.form.setStartButtonState('IDLE');
+    }
+  }
+
+  async postJson(url, payload) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || `Request failed with HTTP ${response.status}.`);
+    }
+
+    return data;
+  }
+
+  startJobPolling() {
+    this.stopJobPolling();
+    this.jobPollTimer = window.setInterval(() => this.loadJobs(), 3000);
+  }
+
+  stopJobPolling() {
+    if (this.jobPollTimer) {
+      window.clearInterval(this.jobPollTimer);
+      this.jobPollTimer = null;
+    }
+  }
+}
+
+// Instantiate and start the app
+document.addEventListener('DOMContentLoaded', () => {
+  const app = new AppController();
+  app.initialize();
+});
