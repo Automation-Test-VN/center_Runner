@@ -11,6 +11,15 @@ for %%I in ("%~dp0..") do set "DEFAULT_CENTER_RUNNER_ROOT=%%~fI"
 
 if "%CENTER_RUNNER_ROOT%"=="" set "CENTER_RUNNER_ROOT=%DEFAULT_CENTER_RUNNER_ROOT%"
 
+REM Load worker.env (created by Jenkins from the WORKER_ENV credential, or placed
+REM manually) so the cmd layer sees the same config node --env-file=worker.env uses.
+REM cmd.exe cannot read worker.env by itself, so parse KEY=VALUE lines here.
+if exist "%CENTER_RUNNER_ROOT%\worker.env" (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%CENTER_RUNNER_ROOT%\worker.env") do (
+    if not "%%A"=="" set "%%A=%%B"
+  )
+)
+
 REM Repo Playwright test on Worker machine
 if "%TEST_REPO_ROOT%"=="" set "TEST_REPO_ROOT=D:\workspace\TS_PW_FBC"
 if "%CENTER_RUNNER_TEST_REPO%"=="" set "CENTER_RUNNER_TEST_REPO=%TEST_REPO_ROOT%"

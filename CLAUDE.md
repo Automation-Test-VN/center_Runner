@@ -18,7 +18,7 @@ npm run worker:dry-run   # print the command that would run, spawn nothing (--on
 npm.cmd run worker -- --source http://localhost:4317/api/jobs/next
 ```
 
-Every script uses `node --env-file=.env`, so a `.env` file must exist (`Copy-Item .env.example .env`). There is no "run a single test" here — a single test *is* one job (`worker:once`), or a single Playwright run inside `../TS_PW_FBC`.
+Each role loads its own env file (so server and worker don't clobber each other on a shared machine): `npm run start` → `--env-file=server.env`, `npm run worker` → `--env-file=worker.env`. That file must exist or Node errors — copy `jenkins/server.env.example` → `server.env` (server machine) and `jenkins/worker.env.example` → `worker.env` (worker machine). Under Jenkins they come from the `SERVER_ENV` / `WORKER_ENV` Secret file credentials. There is no "run a single test" here — a single test *is* one job (`worker:once`), or a single Playwright run inside `../TS_PW_FBC`.
 
 ## Architecture
 

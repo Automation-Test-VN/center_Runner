@@ -75,12 +75,22 @@ The codebase operates on an OOP/POM event-driven file queue.
 
 ## Configure via `.env`
 
-All scripts load `.env` automatically via `node --env-file=.env` (Node.js ≥ 20.6 — no dotenv needed).
-Copy `.env.example` to `.env` and fill in values for your machine before running anything.
+Each role loads its own env file so the server and worker never clobber each
+other's config, even on the same machine:
+
+* `npm run start` → `node --env-file=server.env` (see `jenkins/server.env.example`)
+* `npm run worker` → `node --env-file=worker.env` (see `jenkins/worker.env.example`)
+
+Copy the matching template and fill in values for your machine before running
+anything (Node.js ≥ 20.6 — no dotenv needed):
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item jenkins\server.env.example server.env   # on the server machine
+Copy-Item jenkins\worker.env.example worker.env   # on the worker machine
 ```
+
+Under Jenkins these files are created from Secret file credentials (`SERVER_ENV`
+/ `WORKER_ENV`) — see the Jenkins section below.
 
 ### Server env vars (`npm run start`)
 

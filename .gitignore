@@ -9,3 +9,5 @@ playwright-report/
 blob-report/
 .DS_Store
 Thumbs.db
+server.env
+worker.env
