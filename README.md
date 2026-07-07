@@ -73,19 +73,63 @@ The codebase operates on an OOP/POM event-driven file queue.
 
 
 
-## Configure
+## Configure via `.env`
 
-Set the test repository path when it is not the sibling default `D:\workspace\TS_PW_FBC`:
-
-```powershell
-$env:CENTER_RUNNER_TEST_REPO='D:\workspace\TS_PW_FBC'
-```
-
-## Run Web
+All scripts load `.env` automatically via `node --env-file=.env` (Node.js ≥ 20.6 — no dotenv needed).
+Copy `.env.example` to `.env` and fill in values for your machine before running anything.
 
 ```powershell
-npm.cmd run start
+Copy-Item .env.example .env
 ```
+
+### Server env vars (`npm run start`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `CENTER_RUNNER_PORT` | `4317` | HTTP port the server listens on |
+| `CENTER_RUNNER_HOST` | `0.0.0.0` | Host binding |
+| `CENTER_RUNNER_TEST_REPO` | `../TS_PW_FBC` | Path to the Playwright test repo |
+| `CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS` | `60000` | Long-poll timeout in ms |
+
+### Worker env vars (`npm run worker`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `WORKER_IP` | `127.0.0.1` | IP of this worker machine |
+| `WORKER_NAME` | `worker-{ip}` | Display name of this worker |
+| `CENTER_RUNNER_IP` | *(empty)* | IP of the center server |
+| `CENTER_RUNNER_PORT` | `4317` | Port of the center server |
+| `CENTER_RUNNER_BASE_URL` | *(auto-built from IP+Port)* | Full base URL of center server |
+| `CENTER_RUNNER_COMMAND_SOURCE` | *(auto-built from base URL)* | Poll URL `/api/jobs/next` |
+| `CENTER_RUNNER_INTERVAL_MS` | `5000` | Polling interval in ms |
+| `CENTER_RUNNER_STATE_FILE` | `jobs/worker-state.json` | Last-run job state file |
+| `CENTER_RUNNER_RESULT_FILE` | `jobs/latest-result.json` | Latest result file |
+
+### Adding a new config variable
+
+Adding a variable to `.env` alone has **no effect** — the code must also read it.
+Follow these 4 steps every time:
+
+1. **Add to `.env`** with your real value:
+   ```
+   MY_NEW_VAR=some-value
+   ```
+2. **Add to `.env.example`** with an empty or safe default so others know the variable exists:
+   ```
+   MY_NEW_VAR=
+   ```
+3. **Register in code** — server-side vars go in `src/common/Config.js`, worker-side vars go in `src/worker/WorkerConfig.js`:
+   ```js
+   // Config.js (server)
+   myNewVar: process.env.MY_NEW_VAR || 'default-value',
+
+   // WorkerConfig.js (worker)
+   this.myNewVar = process.env.MY_NEW_VAR || 'default-value';
+   ```
+4. **Use the registered value** inside the relevant class (`Server.js`, `Worker.js`, etc.) via `config.myNewVar` or `this.config.myNewVar`.
+
+> **Rule**: `.env` is the data source. `Config.js` / `WorkerConfig.js` are the single place where every env var is declared and given a default.
+
 
 Open:
 

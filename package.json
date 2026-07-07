@@ -5,10 +5,10 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node ./server.mjs",
-    "worker": "node ./worker.mjs",
-    "worker:once": "node ./worker.mjs --once",
-    "worker:dry-run": "node ./worker.mjs --once --dry-run"
+    "start": "node --env-file=server.env ./server.mjs",
+    "worker": "node --env-file=worker.env ./worker.mjs",
+    "worker:once": "node --env-file=worker.env ./worker.mjs --once",
+    "worker:dry-run": "node --env-file=worker.env ./worker.mjs --once --dry-run"
   },
   "engines": {
     "node": ">=20"
