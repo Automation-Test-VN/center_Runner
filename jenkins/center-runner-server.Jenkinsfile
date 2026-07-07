@@ -7,7 +7,7 @@ pipeline {
   }
 
   parameters {
-    string(name: 'CENTER_RUNNER_ROOT', defaultValue: 'D:\\workspace\\center_Runner', description: 'Path to the Center Runner repo on the Jenkins agent.')
+    string(name: 'CENTER_RUNNER_ROOT', defaultValue: '${WORKSPACE}', description: 'Path to the Center Runner repo on the Jenkins agent.')
     string(name: 'TEST_REPO_ROOT', defaultValue: 'D:\\workspace\\TS_PW_FBC', description: 'Path to the TS_PW_FBC test repo on the Jenkins agent.')
     string(name: 'SERVER_ENV_CREDENTIALS_ID', defaultValue: 'SERVER_ENV', description: 'Jenkins Secret file credential ID holding the server env (copied to CENTER_RUNNER_ROOT\\server.env). Source of truth for CENTER_RUNNER_HOST, CENTER_RUNNER_PORT, CENTER_RUNNER_TEST_REPO, CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS.')
     string(name: 'TEST_ENV_CREDENTIALS_ID', defaultValue: '', description: 'Optional Jenkins Secret file credential ID for the TS_PW_FBC .env (accounts, sheet creds). Leave blank if the test repo already has its .env on the machine.')
