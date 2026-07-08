@@ -18,7 +18,7 @@ npm run worker:dry-run   # print the command that would run, spawn nothing (--on
 npm.cmd run worker -- --source http://localhost:4317/api/jobs/next
 ```
 
-Each role loads its own env file (so server and worker don't clobber each other on a shared machine): `npm run start` → `--env-file=server.env`, `npm run worker` → `--env-file=worker.env`. That file must exist or Node errors — copy `jenkins/server.env.example` → `server.env` (server machine) and `jenkins/worker.env.example` → `worker.env` (worker machine). Under Jenkins they come from the `SERVER_ENV` / `WORKER_ENV` Secret file credentials. There is no "run a single test" here — a single test *is* one job (`worker:once`), or a single Playwright run inside `../TS_PW_FBC`.
+Each role loads its own env file (so server and worker don't clobber each other on a shared machine): `npm run start` → `--env-file=server.env`, `npm run worker` → `--env-file=worker.env`. That file must exist or Node errors — copy `server.env.example` → `server.env` (server machine) and `worker.env.example` → `worker.env` (worker machine). There is no "run a single test" here — a single test *is* one job (`worker:once`), or a single Playwright run inside `../TS_PW_FBC`.
 
 ## Architecture
 
@@ -77,4 +77,4 @@ Adding a config value requires 4 edits (see README "Adding a new config variable
 
 ## Deployment
 
-`jenkins/*.bat` + `center-runner-worker.Jenkinsfile` run workers on a test machine, injecting a secret `TS_PW_FBC/.env` from a Jenkins `Secret file` credential (`ALL_DOMAINS_ENV_FILE`). Server binds `0.0.0.0` for LAN/Tailscale access. See README for LAN/Tailscale/Jenkins setup.
+Two batch files at the project root (`start-server.bat`, `start-workers.bat`) handle setup and launch on cmd.exe. Server binds `0.0.0.0` for LAN/Tailscale access. See README for LAN/Tailscale setup.

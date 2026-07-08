@@ -90,6 +90,11 @@ class Server {
       return this.sendJson(res, 200, result);
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/jobs/clear-history') {
+      const result = await this.jobManager.clearHistory();
+      return this.sendJson(res, 200, result);
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/check-domain') {
       const payload = await this.readJson(req);
       const result = await this.domainChecker.check(payload.domainUrl);
@@ -140,7 +145,7 @@ class Server {
       return this.sendJson(res, 200, { groups });
     }
 
-    const jobResultMatch = url.pathname.match(/^\/api\/jobs\/(CR-\d{8}-\d{6}-[A-Z0-9]{4})\/result$/);
+    const jobResultMatch = url.pathname.match(/^\/api\/jobs\/(AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2})\/result$/);
     if (req.method === 'GET' && jobResultMatch) {
       const result = await this.jobManager.readJobResult(jobResultMatch[1]);
       return result
@@ -249,7 +254,7 @@ class Server {
         body: {
           ok: false,
           error: `BAT file not found: ${config.startWorkersBatPath}`,
-          note: 'Remote workers should normally be started directly on worker machines using jenkins/start-workers.bat.'
+          note: 'Remote workers should normally be started directly on worker machines using start-workers.bat.'
         }
       };
     }

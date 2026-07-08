@@ -29,7 +29,7 @@ const config = {
   latestJobFile: path.join(jobsDir, 'latest-job.json'),
   latestResultFile: path.join(jobsDir, 'latest-result.json'),
 
-  startWorkersBatPath: path.join(rootDir, 'jenkins', 'start-workers.bat'),
+  startWorkersBatPath: path.join(rootDir, 'start-workers.bat'),
 
   workerWaitTimeoutMs: Number(process.env.CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS || 60000)
 };

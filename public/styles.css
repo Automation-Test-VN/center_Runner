@@ -221,6 +221,31 @@ button:disabled {
   background-color: #b71c1c;
 }
 
+.history-action-row td {
+  background: #fff8f0;
+  border-top: 2px dashed #e2a86a;
+  text-align: right;
+  padding: 6px 8px;
+}
+
+.clear-history-button {
+  height: 28px;
+  padding: 0 12px;
+  background-color: #e67e22;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  transition: background-color 0.15s;
+}
+
+.clear-history-button:hover {
+  background-color: #ca6f1e;
+}
+
+
 .report-panel {
   height: min(640px, calc(100vh - 190px));
   min-height: 420px;

@@ -78,19 +78,16 @@ The codebase operates on an OOP/POM event-driven file queue.
 Each role loads its own env file so the server and worker never clobber each
 other's config, even on the same machine:
 
-* `npm run start` → `node --env-file=server.env` (see `jenkins/server.env.example`)
-* `npm run worker` → `node --env-file=worker.env` (see `jenkins/worker.env.example`)
+* `npm run start` → `node --env-file=server.env` (see `server.env.example`)
+* `npm run worker` → `node --env-file=worker.env` (see `worker.env.example`)
 
 Copy the matching template and fill in values for your machine before running
 anything (Node.js ≥ 20.6 — no dotenv needed):
 
 ```powershell
-Copy-Item jenkins\server.env.example server.env   # on the server machine
-Copy-Item jenkins\worker.env.example worker.env   # on the worker machine
+Copy-Item server.env.example server.env   # on the server machine
+Copy-Item worker.env.example worker.env   # on the worker machine
 ```
-
-Under Jenkins these files are created from Secret file credentials (`SERVER_ENV`
-/ `WORKER_ENV`) — see the Jenkins section below.
 
 ### Server env vars (`npm run start`)
 
@@ -234,95 +231,39 @@ http://<test-machine-name>:4317/
 Keep `CENTER_RUNNER_HOST=0.0.0.0`; otherwise the server may only listen on
 `localhost` and remote Tailscale devices will not reach it.
 
-## Jenkins Worker With Secret .env
+## Quick Start via Batch Files
 
-Use this when the test repo needs a secret `.env` file for accounts, Google
-Sheet credentials, or other private test config.
-
-Helper batch files are available under `jenkins/`:
+Two batch files at the project root handle setup and launch automatically:
 
 ```text
-jenkins\prepare-secret-env.bat
-jenkins\install-deps.bat
-jenkins\start-server.bat
-jenkins\start-workers.bat
+start-server.bat
+start-workers.bat
 ```
 
-1. In Jenkins, create a secret file credential:
-   - Go to `Manage Jenkins` -> `Credentials`.
-   - Add credential with kind `Secret file`.
-   - Upload the real `TS_PW_FBC\.env` file.
-   - Set ID to `ALL_DOMAINS_ENV_FILE`.
-
-2. Create a Pipeline job that uses this repository.
-
-3. Set Pipeline script path to:
-
-```text
-jenkins/center-runner-worker.Jenkinsfile
-```
-
-4. Start the Center Runner server on the test machine:
+Start the server (double-click or run from cmd):
 
 ```cmd
 cd /d D:\workspace\center_Runner
-set CENTER_RUNNER_HOST=0.0.0.0
-set CENTER_RUNNER_PORT=4317
-set CENTER_RUNNER_TEST_REPO=D:\workspace\TS_PW_FBC
-npm.cmd run start
+start-server.bat
 ```
 
-5. Run the Jenkins worker job with these defaults:
-
-```text
-CENTER_RUNNER_ROOT=D:\workspace\center_Runner
-TEST_REPO_ROOT=D:\workspace\TS_PW_FBC
-CENTER_RUNNER_URL=http://localhost:4317
-WORKER_COUNT=1
-ENV_CREDENTIALS_ID=ALL_DOMAINS_ENV_FILE
-```
-
-The pipeline calls:
-
-```cmd
-jenkins\prepare-secret-env.bat
-jenkins\install-deps.bat
-jenkins\start-workers.bat
-```
-
-Increase `WORKER_COUNT` to run more queued jobs in parallel. The Jenkins build
-is intentionally long-running; keep it running while you want workers online,
-and stop the build when you want to stop workers.
-
-The pipeline copies the Jenkins secret file to:
-
-```text
-D:\workspace\TS_PW_FBC\.env
-```
-
-Do not print this file in logs and do not commit it to git.
-
-You can also run the same batch files manually from `cmd.exe`.
-
-Start the server:
+Start workers on the same or another machine:
 
 ```cmd
 cd /d D:\workspace\center_Runner
-set CENTER_RUNNER_HOST=0.0.0.0
-set CENTER_RUNNER_PORT=4317
-set TEST_REPO_ROOT=D:\workspace\TS_PW_FBC
-jenkins\start-server.bat
+start-workers.bat
 ```
 
-Start workers:
+Both scripts install npm dependencies automatically and read config from
+`server.env` / `worker.env` at the project root. Copy the matching template
+before first run:
 
-```cmd
-cd /d D:\workspace\center_Runner
-set TEST_REPO_ROOT=D:\workspace\TS_PW_FBC
-set CENTER_RUNNER_URL=http://localhost:4317
-set WORKER_COUNT=3
-jenkins\start-workers.bat
+```powershell
+Copy-Item server.env.example server.env
+Copy-Item worker.env.example worker.env
 ```
+
+Increase `WORKER_COUNT` in `worker.env` to run more queued jobs in parallel.
 
 ## Reports
 

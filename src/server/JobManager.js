@@ -51,7 +51,8 @@ class JobManager {
     }
 
     const now = new Date();
-    const jobId = `CR-${this.formatJobStamp(now)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const suffix = Math.random().toString(36).slice(2, 4).toUpperCase();
+    const jobId = `AL-${this.formatJobStamp(now)}-${brand}-${suffix}`;
 
     return {
       jobId,
@@ -77,7 +78,7 @@ class JobManager {
     const entries = await fs.readdir(config.queuedJobsDir, { withFileTypes: true }).catch(() => []);
 
     const queuedFiles = entries
-      .filter((entry) => entry.isFile() && /^CR-\d{8}-\d{6}-[A-Z0-9]{4}\.json$/.test(entry.name))
+      .filter((entry) => entry.isFile() && /^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}\.json$/.test(entry.name))
       .map((entry) => entry.name)
       .sort();
 
@@ -126,7 +127,7 @@ class JobManager {
     const status = String(payload.status || '').trim().toUpperCase();
     const exitCode = Number(payload.exitCode);
 
-    if (!/^CR-\d{8}-\d{6}-[A-Z0-9]{4}$/.test(jobId)) {
+    if (!/^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}$/.test(jobId)) {
       throw new Error('Invalid jobId.');
     }
 
@@ -192,7 +193,7 @@ class JobManager {
   async abortJob(payload) {
     const jobId = String(payload.jobId || payload.jobIdentity || '').trim();
 
-    if (!/^CR-\d{8}-\d{6}-[A-Z0-9]{4}$/.test(jobId)) {
+    if (!/^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}$/.test(jobId)) {
       throw new Error('Invalid jobId.');
     }
 
@@ -269,7 +270,7 @@ class JobManager {
     const jobs = [];
 
     for (const entry of entries) {
-      if (!entry.isFile() || !/^CR-\d{8}-\d{6}-[A-Z0-9]{4}\.json$/.test(entry.name)) {
+      if (!entry.isFile() || !/^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}\.json$/.test(entry.name)) {
         continue;
       }
 
@@ -334,7 +335,7 @@ class JobManager {
       const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
 
       for (const entry of entries) {
-        if (!entry.isFile() || !/^CR-\d{8}-\d{6}-[A-Z0-9]{4}\.json$/.test(entry.name)) {
+        if (!entry.isFile() || !/^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}\.json$/.test(entry.name)) {
           continue;
         }
 
@@ -400,6 +401,34 @@ class JobManager {
     }
 
     return `/reports/${brand}/report.html`;
+  }
+
+  async clearHistory() {
+    await this.ensureJobDirs();
+
+    const activeJobs = await this.listActiveJobs();
+    const activeJobIds = new Set(activeJobs.map((job) => job.jobId));
+
+    const entries = await fs.readdir(config.jobResultsDir, { withFileTypes: true }).catch(() => []);
+    let deletedCount = 0;
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !/^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}\.json$/.test(entry.name)) {
+        continue;
+      }
+
+      const jobId = entry.name.replace('.json', '');
+
+      // Skip jobs that are still active (QUEUED or RUNNING)
+      if (activeJobIds.has(jobId)) {
+        continue;
+      }
+
+      await this.removeIfExists(path.join(config.jobResultsDir, entry.name));
+      deletedCount++;
+    }
+
+    return { ok: true, deletedCount };
   }
 
   formatJobStamp(date) {

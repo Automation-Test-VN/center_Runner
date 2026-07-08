@@ -42,7 +42,8 @@ class Job {
     }
 
     const now = new Date();
-    const jobId = `CR-${Job.formatJobStamp(now)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const suffix = Math.random().toString(36).slice(2, 4).toUpperCase();
+    const jobId = `AL-${Job.formatJobStamp(now)}-${brand}-${suffix}`;
 
     return new Job({
       jobId,

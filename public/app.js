@@ -116,8 +116,32 @@ class JobTable {
     this.tableBody = document.querySelector(tableBodySelector);
   }
 
-  render(jobs, onOpenReport, onAbortJob) {
+  render(jobs, onOpenReport, onAbortJob, onClearHistory) {
     this.tableBody.innerHTML = '';
+
+    // Render Clear History button row when there are finished (non-active) jobs
+    const finishedJobs = jobs.filter((job) => !job.active);
+    if (finishedJobs.length > 0 && onClearHistory) {
+      const actionRow = document.createElement('tr');
+      actionRow.className = 'history-action-row';
+      const actionCell = document.createElement('td');
+      actionCell.colSpan = 7;
+
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.id = 'clear-history-button';
+      clearBtn.className = 'clear-history-button';
+      clearBtn.textContent = `🗑 Xóa lịch sử (${finishedJobs.length})`;
+      clearBtn.addEventListener('click', () => {
+        if (onClearHistory) {
+          onClearHistory(finishedJobs.length);
+        }
+      });
+
+      actionCell.append(clearBtn);
+      actionRow.append(actionCell);
+      this.tableBody.append(actionRow);
+    }
 
     if (jobs.length === 0) {
       const row = document.createElement('tr');
@@ -300,6 +324,9 @@ class AppController {
         },
         (job) => {
           this.abortJob(job);
+        },
+        (count) => {
+          this.clearHistory(count);
         }
       );
 
@@ -345,6 +372,22 @@ class AppController {
       await this.loadJobs();
     } catch (error) {
       this.summary.setAliveNote(`Abort Error: ${error.message}`);
+    }
+  }
+
+  async clearHistory(count) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa ${count} lịch sử report không?\nHành động này không thể hoàn tác.`)) {
+      return;
+    }
+
+    try {
+      this.summary.setAliveNote('Đang xóa lịch sử...');
+      const result = await this.postJson('/api/jobs/clear-history', {});
+      this.summary.setAliveNote(`Đã xóa ${result.deletedCount} lịch sử report.`);
+      this.reportViewer.clear();
+      await this.loadJobs();
+    } catch (error) {
+      this.summary.setAliveNote(`Clear History Error: ${error.message}`);
     }
   }
 
