@@ -84,6 +84,12 @@ class Server {
       return this.sendJson(res, 200, result);
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/jobs/abort') {
+      const payload = await this.readJson(req);
+      const result = await this.jobManager.abortJob(payload);
+      return this.sendJson(res, 200, result);
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/check-domain') {
       const payload = await this.readJson(req);
       const result = await this.domainChecker.check(payload.domainUrl);

@@ -116,7 +116,7 @@ class JobTable {
     this.tableBody = document.querySelector(tableBodySelector);
   }
 
-  render(jobs, onOpenReport) {
+  render(jobs, onOpenReport, onAbortJob) {
     this.tableBody.innerHTML = '';
 
     if (jobs.length === 0) {
@@ -140,7 +140,7 @@ class JobTable {
         this.statusCell(job.status || '-'),
         this.tableCell(Number.isInteger(job.exitCode) ? String(job.exitCode) : '-'),
         this.tableCell(this.formatTime(job.createdAt || job.startedAt || job.finishedAt)),
-        this.reportCell(job, onOpenReport)
+        this.reportCell(job, onOpenReport, onAbortJob)
       );
 
       this.tableBody.append(row);
@@ -159,8 +159,23 @@ class JobTable {
     return cell;
   }
 
-  reportCell(job, onOpenReport) {
+  reportCell(job, onOpenReport, onAbortJob) {
     const cell = document.createElement('td');
+
+    if (['QUEUED', 'RUNNING'].includes(job.status)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'stop-button';
+      button.textContent = 'Stop';
+      button.addEventListener('click', () => {
+        if (onAbortJob) {
+          onAbortJob(job);
+        }
+      });
+      cell.append(button);
+      return cell;
+    }
+
     if (!job.reportUrl || !['DONE', 'FAILED'].includes(job.status)) {
       cell.textContent = '-';
       return cell;
@@ -278,9 +293,15 @@ class AppController {
       const data = await response.json();
       const jobs = Array.isArray(data.jobs) ? data.jobs : [];
       
-      this.table.render(jobs, (job) => {
-        this.reportViewer.load(job.reportUrl, job.jobId);
-      });
+      this.table.render(
+        jobs,
+        (job) => {
+          this.reportViewer.load(job.reportUrl, job.jobId);
+        },
+        (job) => {
+          this.abortJob(job);
+        }
+      );
 
       this.syncJobSummary(jobs);
     } catch (error) {
@@ -310,6 +331,21 @@ class AppController {
       status: runningCount > 0 ? 'RUNNING' : 'QUEUED',
       note: `Running: ${runningCount} | Queued: ${queuedCount}`
     });
+  }
+
+  async abortJob(job) {
+    if (!confirm(`Bạn có chắc chắn muốn dừng Job ${job.jobId} không?`)) {
+      return;
+    }
+
+    try {
+      this.summary.setAliveNote(`Aborting ${job.jobId}...`);
+      await this.postJson('/api/jobs/abort', { jobId: job.jobId });
+      this.summary.setAliveNote(`Aborted ${job.jobId} successfully.`);
+      await this.loadJobs();
+    } catch (error) {
+      this.summary.setAliveNote(`Abort Error: ${error.message}`);
+    }
   }
 
   async startJob(values) {

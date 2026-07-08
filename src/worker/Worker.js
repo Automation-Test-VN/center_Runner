@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
@@ -100,14 +100,80 @@ class Worker {
     console.log(`[CenterWorker] Claimed job: ${job.identity}`);
     console.log(`[CenterWorker] Running: ${runner.command} ${runner.args.join(' ')}`);
 
-    const result = spawnSync(runner.command, runner.args, {
+    const child = spawn(runner.command, runner.args, {
       cwd: this.config.testRepoRoot,
       env: process.env,
       shell: false,
       stdio: 'inherit'
     });
 
-    const exitCode = result.status ?? 1;
+    let isAborted = false;
+    let pollInterval = null;
+
+    if (/^https?:\/\//i.test(this.config.source)) {
+      const statusUrl = new URL(`/api/jobs/${job.identity}/result`, this.config.source).toString();
+      pollInterval = setInterval(async () => {
+        try {
+          const response = await fetch(statusUrl);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.status === 'ABORTED') {
+              isAborted = true;
+              clearInterval(pollInterval);
+              console.log(`[CenterWorker] Job ${job.identity} has been aborted by server. Killing process tree...`);
+              if (process.platform === 'win32') {
+                try {
+                  spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F']);
+                } catch (err) {
+                  child.kill('SIGKILL');
+                }
+              } else {
+                child.kill('SIGKILL');
+              }
+            }
+          }
+        } catch (err) {
+          // Ignore status polling errors
+        }
+      }, 2000);
+    }
+
+    let spawnError = null;
+    const exitCode = await new Promise((resolve) => {
+      child.on('close', (code) => {
+        resolve(code ?? 1);
+      });
+      child.on('error', (err) => {
+        spawnError = err;
+        resolve(1);
+      });
+    });
+
+    if (pollInterval) {
+      clearInterval(pollInterval);
+    }
+
+    if (isAborted) {
+      const finishedAt = new Date().toISOString();
+      const jobResult = {
+        jobIdentity: job.identity,
+        jobId: job.identity,
+        workerIp: this.config.workerIp,
+        workerName: this.config.workerName,
+        testRepoRoot: this.config.testRepoRoot,
+        command: job.command,
+        status: 'ABORTED',
+        exitCode: null,
+        startedAt,
+        finishedAt
+      };
+
+      await this.writeJson(this.config.resultFile, jobResult);
+      await this.writeState(job.identity, finishedAt);
+      console.log(`[CenterWorker] ABORTED locally.`);
+      return true;
+    }
+
     const status = exitCode === 0 ? 'DONE' : 'FAILED';
     const finishedAt = new Date().toISOString();
 
@@ -138,8 +204,8 @@ class Worker {
       reportHtml
     };
 
-    if (result.error) {
-      jobResult.error = result.error.message;
+    if (spawnError) {
+      jobResult.error = spawnError.message;
     }
 
     await this.writeJson(this.config.resultFile, jobResult);
@@ -147,8 +213,8 @@ class Worker {
 
     await this.writeState(job.identity, finishedAt);
 
-    if (result.error) {
-      throw new Error(`Failed to start runner: ${result.error.message}`);
+    if (spawnError) {
+      throw new Error(`Failed to start runner: ${spawnError.message}`);
     }
 
     console.log(`[CenterWorker] ${status} exitCode=${exitCode}`);

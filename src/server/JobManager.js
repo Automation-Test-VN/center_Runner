@@ -189,6 +189,49 @@ class JobManager {
     };
   }
 
+  async abortJob(payload) {
+    const jobId = String(payload.jobId || payload.jobIdentity || '').trim();
+
+    if (!/^CR-\d{8}-\d{6}-[A-Z0-9]{4}$/.test(jobId)) {
+      throw new Error('Invalid jobId.');
+    }
+
+    const existingResult = await this.readJobResult(jobId);
+    const runningJob = await this.readJobFile(config.runningJobsDir, jobId);
+    const queuedJob = await this.readJobFile(config.queuedJobsDir, jobId);
+    const existingJob = runningJob || queuedJob || existingResult || {};
+
+    const command = existingJob.command || null;
+
+    const result = {
+      ...existingResult,
+      jobId,
+      status: 'ABORTED',
+      exitCode: null,
+      command,
+      workerIp: existingJob.workerIp || existingResult?.workerIp || null,
+      workerName: existingJob.workerName || existingResult?.workerName || null,
+      testRepoRoot: existingJob.testRepoRoot || existingResult?.testRepoRoot || null,
+      createdAt: existingJob.createdAt || existingResult?.createdAt || null,
+      startedAt: existingJob.startedAt || existingResult?.startedAt || null,
+      finishedAt: new Date().toISOString(),
+      reportUrl: null
+    };
+
+    await this.ensureJobDirs();
+    await this.writeJsonFile(config.latestResultFile, result);
+    await this.writeJsonFile(path.join(config.jobResultsDir, `${jobId}.json`), result);
+    await this.removeIfExists(path.join(config.runningJobsDir, `${jobId}.json`));
+    await this.removeIfExists(path.join(config.queuedJobsDir, `${jobId}.json`));
+    await this.syncLatestActiveJob();
+
+    return {
+      ok: true,
+      result,
+      cleared: true
+    };
+  }
+
   async writeJobStatus(job) {
     const result = {
       jobId: job.jobId,
