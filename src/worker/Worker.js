@@ -111,6 +111,19 @@ class Worker {
     const status = exitCode === 0 ? 'DONE' : 'FAILED';
     const finishedAt = new Date().toISOString();
 
+    let reportHtml = null;
+    try {
+      const reportHtmlPath = path.join(this.config.testRepoRoot, 'test-results', job.command.brand, 'report.html');
+      if (fs.existsSync(reportHtmlPath)) {
+        reportHtml = await fsp.readFile(reportHtmlPath, 'utf8');
+        console.log(`[CenterWorker] Successfully read report file: ${reportHtmlPath} (${reportHtml.length} bytes)`);
+      } else {
+        console.log(`[CenterWorker] Report file not found at: ${reportHtmlPath}`);
+      }
+    } catch (error) {
+      console.error(`[CenterWorker] Error reading report file: ${error.message}`);
+    }
+
     const jobResult = {
       jobIdentity: job.identity,
       jobId: job.identity,
@@ -121,7 +134,8 @@ class Worker {
       status,
       exitCode,
       startedAt,
-      finishedAt
+      finishedAt,
+      reportHtml
     };
 
     if (result.error) {

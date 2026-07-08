@@ -145,6 +145,21 @@ class JobManager {
 
     const command = payload.command || existingJob.command || null;
 
+    if (payload.reportHtml && command?.brand) {
+      try {
+        const brand = String(command.brand).trim().toLowerCase();
+        if (/^[a-z0-9-]+$/.test(brand)) {
+          const reportDestDir = path.join(config.testResultsDir, brand);
+          await fs.mkdir(reportDestDir, { recursive: true });
+          const reportDestPath = path.join(reportDestDir, 'report.html');
+          await fs.writeFile(reportDestPath, payload.reportHtml, 'utf8');
+          console.log(`[JobManager] Saved uploaded report for brand ${brand} to ${reportDestPath} (${payload.reportHtml.length} bytes)`);
+        }
+      } catch (error) {
+        console.error(`[JobManager] Failed to save uploaded report: ${error.message}`);
+      }
+    }
+
     const result = {
       ...existingResult,
       jobId,
