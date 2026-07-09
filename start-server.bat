@@ -4,7 +4,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 REM --- CONFIGURATION ---
 set "CENTER_RUNNER_ROOT=D:\workspace\center_Runner"
 set "TEST_REPO_ROOT=D:\workspace\TS_PW_FBC"
-set "SERVER_ENV_FILE=%CENTER_RUNNER_ROOT%\server.env"
+set "SERVER_ENV_FILE=D:\workspace\env\server.env"
 
 echo ============================================================
 echo STEP 1: CHECK ENVIRONMENT FOR SERVER
@@ -17,7 +17,26 @@ if exist "%SERVER_ENV_FILE%" (
 
 echo.
 echo ============================================================
-echo STEP 2: NPM INSTALL DEPENDENCIES
+echo STEP 2: PULL LATEST CENTER RUNNER CODE
+echo ============================================================
+pushd "%CENTER_RUNNER_ROOT%"
+if exist ".git\" (
+    echo [INFO] Pulling latest Center Runner code...
+    call git.exe pull --ff-only
+    if errorlevel 1 (
+        echo [ERROR] Failed to pull latest Center Runner code.
+        popd
+        pause
+        exit /b 1
+    )
+) else (
+    echo [WARNING] %CENTER_RUNNER_ROOT% is not a git repository. Skipping Center Runner pull.
+)
+popd
+
+echo.
+echo ============================================================
+echo STEP 3: NPM INSTALL DEPENDENCIES
 echo ============================================================
 pushd "%CENTER_RUNNER_ROOT%"
 echo [INFO] Installing Center Runner dependencies...
@@ -31,7 +50,7 @@ popd
 
 echo.
 echo ============================================================
-echo STEP 3: STARTING SERVER
+echo STEP 4: STARTING SERVER
 echo ============================================================
 if exist "%SERVER_ENV_FILE%" (
   for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%SERVER_ENV_FILE%") do (

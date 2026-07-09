@@ -71,10 +71,13 @@ class Job {
     ].join('');
   }
 
-  static resolveReportUrl(command) {
+  static resolveReportUrl(command, jobId = '') {
     const brand = String(command?.brand || '').trim().toLowerCase();
     if (!/^[a-z0-9-]+$/.test(brand)) {
       return null;
+    }
+    if (/^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}$/.test(jobId)) {
+      return `/reports/${brand}/${jobId}/report.html`;
     }
     return `/reports/${brand}/report.html`;
   }
@@ -102,7 +105,7 @@ class Job {
       createdAt: this.createdAt,
       startedAt: this.startedAt,
       finishedAt: this.finishedAt,
-      reportUrl: this.reportUrl || Job.resolveReportUrl(this.command)
+      reportUrl: this.reportUrl || Job.resolveReportUrl(this.command, this.jobId)
     };
   }
 }

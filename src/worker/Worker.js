@@ -74,7 +74,7 @@ class Worker {
     let runner = null;
 
     try {
-      runner = this.buildRunner(job.command);
+      runner = this.buildRunner(job.command, job.identity);
     } catch (error) {
       const failedResult = {
         jobIdentity: job.identity,
@@ -102,7 +102,10 @@ class Worker {
 
     const child = spawn(runner.command, runner.args, {
       cwd: this.config.testRepoRoot,
-      env: process.env,
+      env: {
+        ...process.env,
+        JOB_ID: job.identity
+      },
       shell: false,
       stdio: 'inherit'
     });
@@ -179,7 +182,7 @@ class Worker {
 
     let reportHtml = null;
     try {
-      const reportHtmlPath = path.join(this.config.testRepoRoot, 'test-results', job.command.brand, 'report.html');
+      const reportHtmlPath = this.resolveReportHtmlPath(job.command.brand, job.identity);
       if (fs.existsSync(reportHtmlPath)) {
         reportHtml = await fsp.readFile(reportHtmlPath, 'utf8');
         console.log(`[CenterWorker] Successfully read report file: ${reportHtmlPath} (${reportHtml.length} bytes)`);
@@ -327,19 +330,34 @@ class Worker {
     };
   }
 
-  buildRunner(command) {
+  buildRunner(command, jobId = '') {
     this.validateCommand(command);
+
+    const args = [
+      path.join(this.config.testRepoRoot, 'scripts', 'run-domain-test.mjs'),
+      command.group,
+      command.brand,
+      '--grep',
+      command.tag
+    ];
+
+    if (jobId) {
+      args.push('--job-id', jobId);
+    }
 
     return {
       command: process.execPath,
-      args: [
-        path.join(this.config.testRepoRoot, 'scripts', 'run-domain-test.mjs'),
-        command.group,
-        command.brand,
-        '--grep',
-        command.tag
-      ]
+      args
     };
+  }
+
+  resolveReportHtmlPath(brand, jobId) {
+    const jobReportPath = path.join(this.config.testRepoRoot, 'test-results', brand, jobId, 'report.html');
+    if (jobId && fs.existsSync(jobReportPath)) {
+      return jobReportPath;
+    }
+
+    return path.join(this.config.testRepoRoot, 'test-results', brand, 'report.html');
   }
 
   validateCommand(command) {

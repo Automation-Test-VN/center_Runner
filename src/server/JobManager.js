@@ -150,11 +150,11 @@ class JobManager {
       try {
         const brand = String(command.brand).trim().toLowerCase();
         if (/^[a-z0-9-]+$/.test(brand)) {
-          const reportDestDir = path.join(config.testResultsDir, brand);
+          const reportDestDir = path.join(config.testResultsDir, brand, jobId);
           await fs.mkdir(reportDestDir, { recursive: true });
           const reportDestPath = path.join(reportDestDir, 'report.html');
           await fs.writeFile(reportDestPath, payload.reportHtml, 'utf8');
-          console.log(`[JobManager] Saved uploaded report for brand ${brand} to ${reportDestPath} (${payload.reportHtml.length} bytes)`);
+          console.log(`[JobManager] Saved uploaded report for job ${jobId} to ${reportDestPath} (${payload.reportHtml.length} bytes)`);
         }
       } catch (error) {
         console.error(`[JobManager] Failed to save uploaded report: ${error.message}`);
@@ -173,7 +173,7 @@ class JobManager {
       createdAt: existingJob.createdAt || existingResult?.createdAt || null,
       startedAt: payload.startedAt || existingJob.startedAt || existingResult?.startedAt || null,
       finishedAt: payload.finishedAt || new Date().toISOString(),
-      reportUrl: this.resolveReportUrl(command)
+      reportUrl: this.resolveReportUrl(command, jobId)
     };
 
     await this.ensureJobDirs();
@@ -393,11 +393,15 @@ class JobManager {
     return value.trim();
   }
 
-  resolveReportUrl(command) {
+  resolveReportUrl(command, jobId = '') {
     const brand = String(command?.brand || '').trim().toLowerCase();
 
     if (!/^[a-z0-9-]+$/.test(brand)) {
       return null;
+    }
+
+    if (/^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}$/.test(jobId)) {
+      return `/reports/${brand}/${jobId}/report.html`;
     }
 
     return `/reports/${brand}/report.html`;

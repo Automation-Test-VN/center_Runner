@@ -4,7 +4,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 REM --- CONFIGURATION ---
 set "CENTER_RUNNER_ROOT=D:\workspace\center_Runner"
 set "TEST_REPO_ROOT=D:\workspace\TS_PW_FBC"
-set "WORKER_ENV_FILE=%CENTER_RUNNER_ROOT%\worker.env"
+set "WORKER_ENV_FILE=D:\workspace\env\worker.env"
 set "ALL_DOMAINS_ENV_FILE=%TEST_REPO_ROOT%\test_secret.env"
 
 echo ============================================================
@@ -21,7 +21,26 @@ echo [OK] Copied %ALL_DOMAINS_ENV_FILE% to %TEST_REPO_ROOT%\.env
 
 echo.
 echo ============================================================
-echo STEP 2: NPM INSTALL DEPENDENCIES
+echo STEP 2: PULL LATEST CENTER RUNNER CODE
+echo ============================================================
+pushd "%CENTER_RUNNER_ROOT%"
+if exist ".git\" (
+    echo [INFO] Pulling latest Center Runner code...
+    call git.exe pull --ff-only
+    if errorlevel 1 (
+        echo [ERROR] Failed to pull latest Center Runner code.
+        popd
+        pause
+        exit /b 1
+    )
+) else (
+    echo [WARNING] %CENTER_RUNNER_ROOT% is not a git repository. Skipping Center Runner pull.
+)
+popd
+
+echo.
+echo ============================================================
+echo STEP 3: NPM INSTALL DEPENDENCIES
 echo ============================================================
 pushd "%CENTER_RUNNER_ROOT%"
 echo [INFO] Installing Center Runner dependencies...
@@ -35,7 +54,7 @@ popd
 
 echo.
 echo ============================================================
-echo STEP 3: LOAD CONFIG AND CHECK NETWORK CONNECTION
+echo STEP 4: LOAD CONFIG AND CHECK NETWORK CONNECTION
 echo ============================================================
 if not exist "%WORKER_ENV_FILE%" goto SKIP_PARSE_ENV
 for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%WORKER_ENV_FILE%") do (
@@ -72,7 +91,7 @@ exit /b 1
 :STEP4_START
 echo.
 echo ============================================================
-echo STEP 4: STARTING WORKERS
+echo STEP 5: STARTING WORKERS
 echo ============================================================
 pushd "%CENTER_RUNNER_ROOT%"
 set /a "W_COUNT=%WORKER_COUNT%"
