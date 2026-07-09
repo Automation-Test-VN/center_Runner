@@ -11,7 +11,7 @@ echo ============================================================
 echo STEP 1: CHECK ENVIRONMENT FOR WORKER AND TEST REPO
 echo ============================================================
 if not exist "%WORKER_ENV_FILE%" goto SKIP_WORKER_MSG
-echo [OK] Found worker.env directly at project root: %WORKER_ENV_FILE%
+echo [OK] Found worker env file: %WORKER_ENV_FILE%
 :SKIP_WORKER_MSG
 
 if not exist "%ALL_DOMAINS_ENV_FILE%" goto SKIP_COPY_TEST_ENV
@@ -101,7 +101,7 @@ set "I=1"
 if %I% GTR %W_COUNT% goto LOOP_END
 set "CURRENT_WORKER_NAME=%WORKER_NAME%-%I%"
 echo Launching worker %I%/%W_COUNT%: %CURRENT_WORKER_NAME%
-start "center-runner-worker-%I%" cmd /k "set WORKER_NAME=%CURRENT_WORKER_NAME%&& npm run worker -- --source "%CENTER_RUNNER_COMMAND_SOURCE%" --interval-ms "%CENTER_RUNNER_INTERVAL_MS%""
+start "center-runner-worker-%I%" cmd /k "set WORKER_NAME=%CURRENT_WORKER_NAME%&& node.exe .\worker.mjs --source "%CENTER_RUNNER_COMMAND_SOURCE%" --interval-ms "%CENTER_RUNNER_INTERVAL_MS%""
 set /a "I+=1"
 goto LOOP_WORKERS
 

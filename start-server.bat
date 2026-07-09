@@ -10,9 +10,9 @@ echo ============================================================
 echo STEP 1: CHECK ENVIRONMENT FOR SERVER
 echo ============================================================
 if exist "%SERVER_ENV_FILE%" (
-    echo [OK] Found server.env directly at project root: %SERVER_ENV_FILE%
+    echo [OK] Found server env file: %SERVER_ENV_FILE%
 ) else (
-    echo [WARNING] server.env not found at project root. Using default configurations.
+    echo [WARNING] server env file not found at %SERVER_ENV_FILE%. Using default configurations.
 )
 
 echo.
@@ -66,7 +66,7 @@ echo [INFO] Starting Center Runner server on %CENTER_RUNNER_HOST%:%CENTER_RUNNER
 echo [INFO] CENTER_RUNNER_TEST_REPO=%CENTER_RUNNER_TEST_REPO%
 
 pushd "%CENTER_RUNNER_ROOT%"
-call npm.cmd run start
+call node.exe .\server.mjs
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 
