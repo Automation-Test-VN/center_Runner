@@ -196,10 +196,84 @@ button:disabled {
   font-weight: 700;
 }
 
+.status-aborted {
+  color: #d32f2f;
+  font-weight: 700;
+}
+
 .report-button {
   height: 28px;
   padding: 0 10px;
 }
+
+.stop-button {
+  height: 28px;
+  padding: 0 10px;
+  background-color: #d32f2f;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.stop-button:hover {
+  background-color: #b71c1c;
+}
+
+.history-action-row td {
+  background: #fff8f0;
+  border-top: 2px dashed #e2a86a;
+  text-align: right;
+  padding: 6px 8px;
+}
+
+.clear-history-button {
+  height: 28px;
+  padding: 0 12px;
+  background-color: #e67e22;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  transition: background-color 0.15s;
+}
+
+.clear-history-button:hover {
+  background-color: #ca6f1e;
+}
+
+.job-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.job-pagination-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.page-button {
+  min-width: 32px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.page-button[aria-current="page"] {
+  background: var(--accent);
+  color: #fff;
+}
+
 
 .report-panel {
   height: min(640px, calc(100vh - 190px));

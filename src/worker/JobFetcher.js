@@ -7,27 +7,40 @@ class JobFetcher {
     this.urlPattern = /^https?:\/\//i;
   }
 
-  async fetchJob(source) {
+  async fetchJob(source, workerIp = null, workerName = null) {
     if (this.urlPattern.test(source)) {
-      return this.fetchFromUrl(source);
+      return this.fetchFromUrl(source, workerIp, workerName);
     }
     return this.fetchFromFile(source);
   }
 
-  async fetchFromUrl(source) {
-    const response = await fetch(source, { headers: { accept: 'application/json' } });
+  async fetchFromUrl(source, workerIp = null, workerName = null) {
+    let requestUrl = source;
+    if (workerIp || workerName) {
+      const url = new URL(source);
+      if (workerIp && !url.searchParams.has('workerIp')) {
+        url.searchParams.set('workerIp', workerIp);
+      }
+      if (workerName && !url.searchParams.has('workerName')) {
+        url.searchParams.set('workerName', workerName);
+      }
+      requestUrl = url.toString();
+    }
+
+    const response = await fetch(requestUrl, { headers: { accept: 'application/json' } });
     if (response.status === 204 || response.status === 404) {
       return null;
     }
 
     if (!response.ok) {
-      throw new Error(`Cannot read command from ${source}: HTTP ${response.status}`);
+      const body = await response.text().catch(() => '');
+      throw new Error(`Cannot read command from ${requestUrl}: HTTP ${response.status} ${body}`);
     }
 
     const rawJob = await response.json();
     const command = this.normalizeCommand(rawJob);
     return {
-      identity: String(rawJob?.jobId || this.hashCommand(command)),
+      identity: String(rawJob?.jobId || rawJob?.id || this.hashCommand(command)),
       command
     };
   }

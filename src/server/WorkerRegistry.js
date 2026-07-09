@@ -3,63 +3,86 @@ import config from '../common/Config.js';
 class WorkerRegistry {
   constructor() {
     this.waitingWorkers = [];
+    this.workerWaitTimeoutMs = config.workerWaitTimeoutMs;
   }
 
-  add(res, jobManager) {
-    const waiter = { res, timeout: null };
-    
+  add(res, jobManager, workerIp, workerName) {
+    const waiter = {
+      res,
+      workerIp,
+      workerName,
+      createdAt: new Date().toISOString(),
+      timeout: null
+    };
+
     waiter.timeout = setTimeout(() => {
-      const index = this.waitingWorkers.indexOf(waiter);
-      if (index >= 0) {
-        this.waitingWorkers.splice(index, 1);
-      }
+      this.remove(waiter);
 
       if (!res.writableEnded) {
-        res.writeHead(204, {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-store'
-        });
-        res.end(JSON.stringify({ ok: false, message: 'No job available.' }));
+        this.sendNoContent(res);
       }
-    }, config.workerWaitTimeoutMs);
+    }, this.workerWaitTimeoutMs);
+
+    res.on('close', () => {
+      clearTimeout(waiter.timeout);
+      this.remove(waiter);
+    });
 
     this.waitingWorkers.push(waiter);
   }
 
-  async notify(jobManager) {
-    const waiter = this.waitingWorkers.shift();
-    if (!waiter) {
-      return;
-    }
+  async notifyAll(jobManager) {
+    while (this.waitingWorkers.length > 0) {
+      const waiter = this.waitingWorkers.shift();
 
-    clearTimeout(waiter.timeout);
-    
-    try {
-      const job = await jobManager.claimNextJob();
-      if (!waiter.res.writableEnded) {
-        if (job) {
-          waiter.res.writeHead(200, {
-            'content-type': 'application/json; charset=utf-8',
-            'cache-control': 'no-store'
-          });
-          waiter.res.end(JSON.stringify(job));
-        } else {
-          waiter.res.writeHead(204, {
-            'content-type': 'application/json; charset=utf-8',
-            'cache-control': 'no-store'
-          });
-          waiter.res.end(JSON.stringify({ ok: false, message: 'No job available.' }));
-        }
+      if (!waiter) {
+        continue;
       }
-    } catch (error) {
-      if (!waiter.res.writableEnded) {
-        waiter.res.writeHead(500, {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-store'
-        });
-        waiter.res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+
+      clearTimeout(waiter.timeout);
+
+      if (waiter.res.writableEnded) {
+        continue;
       }
+
+      const job = await jobManager.claimNextJob(waiter.workerIp, waiter.workerName);
+
+      if (!job) {
+        this.sendNoContent(waiter.res);
+        break;
+      }
+
+      this.sendJson(waiter.res, 200, job);
     }
+  }
+
+  async notify(jobManager) {
+    return this.notifyAll(jobManager);
+  }
+
+  remove(waiter) {
+    const index = this.waitingWorkers.indexOf(waiter);
+
+    if (index >= 0) {
+      this.waitingWorkers.splice(index, 1);
+    }
+  }
+
+  sendJson(res, status, payload) {
+    res.writeHead(status, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store'
+    });
+
+    res.end(JSON.stringify(payload));
+  }
+
+  sendNoContent(res) {
+    res.writeHead(204, {
+      'cache-control': 'no-store'
+    });
+
+    res.end();
   }
 }
 

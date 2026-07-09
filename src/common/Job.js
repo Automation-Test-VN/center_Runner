@@ -1,3 +1,5 @@
+import { createJobIdForTool, formatJobStamp, resolveReportUrl } from './JobId.js';
+
 class Job {
   constructor(data) {
     this.jobId = data.jobId;
@@ -8,6 +10,8 @@ class Job {
     this.command = data.command;
     this.exitCode = data.exitCode !== undefined ? data.exitCode : null;
     this.reportUrl = data.reportUrl || null;
+    this.workerIp = data.workerIp || null;
+    this.workerName = data.workerName || null;
   }
 
   static fromPayload(payload, defaultTag = '@smoke') {
@@ -40,7 +44,7 @@ class Job {
     }
 
     const now = new Date();
-    const jobId = `CR-${Job.formatJobStamp(now)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const jobId = createJobIdForTool(tool, { brand, date: now });
 
     return new Job({
       jobId,
@@ -56,24 +60,11 @@ class Job {
   }
 
   static formatJobStamp(date) {
-    const pad = (value) => String(value).padStart(2, '0');
-    return [
-      date.getFullYear(),
-      pad(date.getMonth() + 1),
-      pad(date.getDate()),
-      '-',
-      pad(date.getHours()),
-      pad(date.getMinutes()),
-      pad(date.getSeconds())
-    ].join('');
+    return formatJobStamp(date);
   }
 
-  static resolveReportUrl(command) {
-    const brand = String(command?.brand || '').trim().toLowerCase();
-    if (!/^[a-z0-9-]+$/.test(brand)) {
-      return null;
-    }
-    return `/reports/${brand}/report.html`;
+  static resolveReportUrl(command, jobId = '') {
+    return resolveReportUrl(command, jobId);
   }
 
   toActiveJSON() {
@@ -82,7 +73,9 @@ class Job {
       createdAt: this.createdAt,
       startedAt: this.startedAt,
       status: this.status,
-      command: this.command
+      command: this.command,
+      workerIp: this.workerIp,
+      workerName: this.workerName
     };
   }
 
@@ -92,10 +85,12 @@ class Job {
       status: this.status,
       exitCode: this.exitCode,
       command: this.command,
+      workerIp: this.workerIp,
+      workerName: this.workerName,
       createdAt: this.createdAt,
       startedAt: this.startedAt,
       finishedAt: this.finishedAt,
-      reportUrl: this.reportUrl || Job.resolveReportUrl(this.command)
+      reportUrl: this.reportUrl || Job.resolveReportUrl(this.command, this.jobId)
     };
   }
 }

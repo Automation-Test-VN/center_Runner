@@ -2,46 +2,36 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(__dirname, '..', '..');
 
-class Config {
-  constructor() {
-    this.host = process.env.CENTER_RUNNER_HOST || '0.0.0.0';
-    this.port = Number(process.env.CENTER_RUNNER_PORT || process.env.PORT || 4317);
-    
-    // Test repo path setup
-    const defaultTestRepoRoot = path.resolve(__dirname, '..', '..', '..', 'TS_PW_FBC');
-    this.testRepoRoot = path.resolve(process.env.CENTER_RUNNER_TEST_REPO || defaultTestRepoRoot);
-    
-    // Directories for jobs & results
-    const defaultJobsDir = path.resolve(__dirname, '..', '..', 'jobs');
-    this.jobsDir = path.resolve(process.env.CENTER_RUNNER_JOBS_DIR || defaultJobsDir);
-    this.publicDir = path.resolve(__dirname, '..', '..', 'public');
-    
-    this.queuedJobsDir = path.join(this.jobsDir, 'queue');
-    this.runningJobsDir = path.join(this.jobsDir, 'running');
-    this.jobResultsDir = path.join(this.jobsDir, 'results');
-    
-    // File paths
-    this.latestCommandFile = path.join(this.jobsDir, 'latest-command.json');
-    this.latestJobFile = path.join(this.jobsDir, 'latest-job.json');
-    this.latestResultFile = path.join(this.jobsDir, 'latest-result.json');
-    
-    // Target test directories
-    this.testsDir = path.join(this.testRepoRoot, 'tests');
-    this.testResultsDir = path.join(this.testRepoRoot, 'test-results');
-    
-    // Other settings
-    this.workerWaitTimeoutMs = Number(process.env.CENTER_RUNNER_WORKER_TIMEOUT_MS || 60000);
-    this.testScriptRelativePath = process.env.CENTER_RUNNER_TEST_SCRIPT || 'scripts/run-domain-test.mjs';
-    this.defaultTag = process.env.CENTER_RUNNER_DEFAULT_TAG || '@smoke';
-  }
+const defaultTestRepoRoot = path.resolve(rootDir, '..', 'TS_PW_FBC');
+const testRepoRoot = path.resolve(process.env.CENTER_RUNNER_TEST_REPO || process.env.TEST_REPO_ROOT || defaultTestRepoRoot);
 
-  get testScriptPath() {
-    return path.join(this.testRepoRoot, this.testScriptRelativePath);
-  }
-}
+const jobsDir = path.join(rootDir, 'jobs');
 
-// Singleton instance
-const config = new Config();
+const config = {
+  rootDir,
+  port: Number(process.env.CENTER_RUNNER_PORT || process.env.PORT || 4317),
+  host: process.env.CENTER_RUNNER_HOST || '0.0.0.0',
+
+  publicDir: path.join(rootDir, 'public'),
+
+  testRepoRoot,
+  testsDir: path.join(testRepoRoot, 'tests'),
+  testResultsDir: path.join(testRepoRoot, 'test-results'),
+
+  jobsDir,
+  queuedJobsDir: path.join(jobsDir, 'queue'),
+  runningJobsDir: path.join(jobsDir, 'running'),
+  jobResultsDir: path.join(jobsDir, 'results'),
+
+  latestCommandFile: path.join(jobsDir, 'latest-command.json'),
+  latestJobFile: path.join(jobsDir, 'latest-job.json'),
+  latestResultFile: path.join(jobsDir, 'latest-result.json'),
+
+  startWorkersBatPath: path.join(rootDir, 'start-workers.bat'),
+
+  workerWaitTimeoutMs: Number(process.env.CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS || 60000)
+};
+
 export default config;
-export { Config };

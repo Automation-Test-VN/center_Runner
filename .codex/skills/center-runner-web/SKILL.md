@@ -11,10 +11,11 @@ description: Build or extend the TS_PW_FBC Center Runner web control panel that 
 2. Keep the web tool isolated under `tools/center-runner` (or in its dedicated repository) unless the user asks to integrate it into the main framework.
 3. Follow the established **OOP** (Object-Oriented Programming) and **POM** (Page Object Model) architectures. Do not add procedural global variables or helper functions.
 4. Treat `tool`, `group`, `brand`, and `tag` as the required Alive Daily command fields.
-5. Do not log passwords in terminal output, browser UI summaries, job ids, or saved preview text. If credentials must be stored for a future manual tool prototype, mark it clearly and keep it local-only.
-6. Reuse the repository runner command shape: `npm run test -- <fbc-group> <domain> [playwright args...]`.
-7. Preserve one independent spec file per domain. Do not merge domain specs into a cross-domain spec for runner convenience.
-8. After TypeScript changes, run `npm run check`. For static HTML/CSS/JS server-only changes, run the local server smoke check instead.
+5. Treat `src/common/JobId.js` as the source of truth for job id patterns. `aliveDaily` uses `ALIVE_DAILY_JOB_ID_PATTERN` with format `AL-YYYYMMDD-HHMMSS-brand-XX`; new tools must add a separate registry entry instead of changing the aliveDaily pattern.
+6. Do not log passwords in terminal output, browser UI summaries, job ids, or saved preview text. If credentials must be stored for a future manual tool prototype, mark it clearly and keep it local-only.
+7. Reuse the repository runner command shape: `npm run test -- <fbc-group> <domain> [playwright args...]`.
+8. Preserve one independent spec file per domain. Do not merge domain specs into a cross-domain spec for runner convenience.
+9. After TypeScript changes, run `npm run check`. For static HTML/CSS/JS server-only changes, run the local server smoke check instead.
 
 ## Codebase Architecture (OOP & POM Standards)
 
@@ -23,6 +24,7 @@ All new features and modifications must adhere to the following class structure:
 ### Common Layer
 * `Config`: Encapsulates environments, directories, port, host, and path resolutions.
 * `Job`: Represents the Job domain model, validation, and JSON serialization state.
+* `JobId`: Owns tool-specific job id patterns, id generators, validators, and report URL helpers.
 
 ### Server Layer (`src/server/`)
 * `JobManager`: Core manager handling reading, writing, claiming, and completing jobs on the filesystem.
@@ -63,6 +65,14 @@ Use this shape unless a later migration requires a version bump:
   "tag": "@smoke"
 }
 ```
+
+## Job ID Contract
+
+- Create ids through `createJobIdForTool(tool, { brand, date })`.
+- Validate queue and result ids through `isValidJobId()` / `isValidJobFileName()`.
+- The worker passes the claimed id to TS_PW_FBC as both `--job-id` and `JOB_ID`.
+- TS_PW_FBC writes job-scoped reports to `test-results/<brand>/<jobId>/report.html`.
+- When adding a new tool, add a new entry to `JOB_ID_CONFIG_BY_TOOL`; do not reuse or loosen `ALIVE_DAILY_JOB_ID_PATTERN`.
 
 ## References
 

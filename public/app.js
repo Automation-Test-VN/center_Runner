@@ -112,24 +112,59 @@ class RunnerForm {
 }
 
 class JobTable {
-  constructor(tableBodySelector) {
+  constructor(tableBodySelector, paginationSelector) {
     this.tableBody = document.querySelector(tableBodySelector);
+    this.pagination = document.querySelector(paginationSelector);
+    this.maxJobs = 30;
+    this.pageSize = 15;
+    this.currentPage = 1;
   }
 
-  render(jobs, onOpenReport) {
+  render(jobs, onOpenReport, onAbortJob, onClearHistory) {
+    const visibleJobs = jobs.slice(0, this.maxJobs);
+    const pageCount = Math.max(1, Math.ceil(visibleJobs.length / this.pageSize));
+    this.currentPage = Math.min(this.currentPage, pageCount);
+    const pageStart = (this.currentPage - 1) * this.pageSize;
+    const pageJobs = visibleJobs.slice(pageStart, pageStart + this.pageSize);
+
     this.tableBody.innerHTML = '';
 
-    if (jobs.length === 0) {
+    // Render Clear History button row when there are finished (non-active) jobs
+    const finishedJobs = visibleJobs.filter((job) => !job.active);
+    if (finishedJobs.length > 0 && onClearHistory) {
+      const actionRow = document.createElement('tr');
+      actionRow.className = 'history-action-row';
+      const actionCell = document.createElement('td');
+      actionCell.colSpan = 7;
+
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.id = 'clear-history-button';
+      clearBtn.className = 'clear-history-button';
+      clearBtn.textContent = `🗑 Xóa lịch sử (${finishedJobs.length})`;
+      clearBtn.addEventListener('click', () => {
+        if (onClearHistory) {
+          onClearHistory(finishedJobs.length);
+        }
+      });
+
+      actionCell.append(clearBtn);
+      actionRow.append(actionCell);
+      this.tableBody.append(actionRow);
+    }
+
+    if (visibleJobs.length === 0) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
       cell.colSpan = 7;
       cell.textContent = 'No jobs yet.';
       row.append(cell);
       this.tableBody.append(row);
+      this.renderPagination(visibleJobs.length, pageCount);
       return;
     }
 
-    for (const job of jobs) {
+    for (const job of pageJobs) {
       const row = document.createElement('tr');
       row.dataset.status = job.status || 'IDLE';
 
@@ -140,11 +175,51 @@ class JobTable {
         this.statusCell(job.status || '-'),
         this.tableCell(Number.isInteger(job.exitCode) ? String(job.exitCode) : '-'),
         this.tableCell(this.formatTime(job.createdAt || job.startedAt || job.finishedAt)),
-        this.reportCell(job, onOpenReport)
+        this.reportCell(job, onOpenReport, onAbortJob)
       );
 
       this.tableBody.append(row);
     }
+
+    this.renderPagination(visibleJobs.length, pageCount);
+  }
+
+  renderPagination(totalJobs, pageCount) {
+    if (!this.pagination) {
+      return;
+    }
+
+    this.pagination.innerHTML = '';
+
+    if (totalJobs === 0) {
+      return;
+    }
+
+    const status = document.createElement('span');
+    const pageStart = (this.currentPage - 1) * this.pageSize + 1;
+    const pageEnd = Math.min(this.currentPage * this.pageSize, totalJobs);
+    status.className = 'job-pagination-status';
+    status.textContent = `${pageStart}-${pageEnd} / ${totalJobs} jobs`;
+    this.pagination.append(status);
+
+    const buttonGroup = document.createElement('div');
+    buttonGroup.className = 'job-pagination-buttons';
+
+    for (let page = 1; page <= pageCount; page += 1) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'page-button';
+      button.textContent = String(page);
+      button.disabled = page === this.currentPage;
+      button.setAttribute('aria-current', page === this.currentPage ? 'page' : 'false');
+      button.addEventListener('click', () => {
+        this.currentPage = page;
+        this.onPageChange?.();
+      });
+      buttonGroup.append(button);
+    }
+
+    this.pagination.append(buttonGroup);
   }
 
   tableCell(value) {
@@ -159,8 +234,23 @@ class JobTable {
     return cell;
   }
 
-  reportCell(job, onOpenReport) {
+  reportCell(job, onOpenReport, onAbortJob) {
     const cell = document.createElement('td');
+
+    if (['QUEUED', 'RUNNING'].includes(job.status)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'stop-button';
+      button.textContent = 'Stop';
+      button.addEventListener('click', () => {
+        if (onAbortJob) {
+          onAbortJob(job);
+        }
+      });
+      cell.append(button);
+      return cell;
+    }
+
     if (!job.reportUrl || !['DONE', 'FAILED'].includes(job.status)) {
       cell.textContent = '-';
       return cell;
@@ -234,7 +324,8 @@ class ReportViewer {
 class AppController {
   constructor() {
     this.form = new RunnerForm('#runner-form', (values) => this.startJob(values));
-    this.table = new JobTable('#job-list');
+    this.table = new JobTable('#job-list', '#job-pagination');
+    this.table.onPageChange = () => this.loadJobs();
     this.summary = new JobSummary({
       jobIdId: 'job-id',
       groupId: 'group-label',
@@ -278,9 +369,18 @@ class AppController {
       const data = await response.json();
       const jobs = Array.isArray(data.jobs) ? data.jobs : [];
       
-      this.table.render(jobs, (job) => {
-        this.reportViewer.load(job.reportUrl, job.jobId);
-      });
+      this.table.render(
+        jobs,
+        (job) => {
+          this.reportViewer.load(job.reportUrl, job.jobId);
+        },
+        (job) => {
+          this.abortJob(job);
+        },
+        (count) => {
+          this.clearHistory(count);
+        }
+      );
 
       this.syncJobSummary(jobs);
     } catch (error) {
@@ -310,6 +410,37 @@ class AppController {
       status: runningCount > 0 ? 'RUNNING' : 'QUEUED',
       note: `Running: ${runningCount} | Queued: ${queuedCount}`
     });
+  }
+
+  async abortJob(job) {
+    if (!confirm(`Bạn có chắc chắn muốn dừng Job ${job.jobId} không?`)) {
+      return;
+    }
+
+    try {
+      this.summary.setAliveNote(`Aborting ${job.jobId}...`);
+      await this.postJson('/api/jobs/abort', { jobId: job.jobId });
+      this.summary.setAliveNote(`Aborted ${job.jobId} successfully.`);
+      await this.loadJobs();
+    } catch (error) {
+      this.summary.setAliveNote(`Abort Error: ${error.message}`);
+    }
+  }
+
+  async clearHistory(count) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa ${count} lịch sử report không?\nHành động này không thể hoàn tác.`)) {
+      return;
+    }
+
+    try {
+      this.summary.setAliveNote('Đang xóa lịch sử...');
+      const result = await this.postJson('/api/jobs/clear-history', {});
+      this.summary.setAliveNote(`Đã xóa ${result.deletedCount} lịch sử report.`);
+      this.reportViewer.clear();
+      await this.loadJobs();
+    } catch (error) {
+      this.summary.setAliveNote(`Clear History Error: ${error.message}`);
+    }
   }
 
   async startJob(values) {

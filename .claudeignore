@@ -1,0 +1,37 @@
+# ==========================================
+# 1. CHẶN THƯ MỤC CẤU HÌNH & HỆ THỐNG (ẨN)
+# ==========================================
+.git/
+.vscode/
+.agents/
+.claude/
+.codex/
+
+# ==========================================
+# 2. CHẶN KẾT QUẢ RUN & WORKER (HỐ ĐEN NUỐT TOKEN)
+# Chặn toàn bộ thư mục kết quả trong jobs và các file json tự sinh
+# ==========================================
+jobs/queue/
+jobs/results/
+jobs/running/
+
+# Chặn đích danh các file log/result JSON của worker sinh ra ở thư mục gốc
+latest-result*.json
+worker-state*.json
+
+# ==========================================
+# 3. CHẶN PHỤ THUỘC & FILE ĐÃ BUILD (CƠ BẢN)
+# Tránh trường hợp node_modules xuất hiện khi install
+# ==========================================
+node_modules/
+dist/
+build/
+*.log
+
+# ==========================================
+# 4. CHẶN CÁC FILE CHỨA THÔNG TIN BẢO MẬT (ENV)
+# Tránh lộ key hoặc thông tin config nhạy cảm
+# ==========================================
+server.env
+worker.env
+.env

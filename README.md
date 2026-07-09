@@ -9,6 +9,7 @@ Standalone web queue and worker for running TS_PW_FBC domain tests.
 * [src/](./src/): Core OOP modules split into layers:
   * [common/Config.js](./src/common/Config.js): Configuration and path setup.
   * [common/Job.js](./src/common/Job.js): Job model and serialization.
+  * [common/JobId.js](./src/common/JobId.js): Tool-specific job id patterns, generators, validators, and report URL helpers.
   * [server/Server.js](./src/server/Server.js): HTTP router and static report server.
   * [server/JobManager.js](./src/server/JobManager.js): Filesystem job queue and result storage manager.
   * [server/DomainChecker.js](./src/server/DomainChecker.js): Preflight domain checking.
@@ -27,7 +28,7 @@ The codebase operates on an OOP/POM event-driven file queue.
 ### Core Flows Summary
 
 1. **Server Initialization**: Startup flow begins at [server.mjs](./server.mjs) which instantiates and launches the [Server.js](./src/server/Server.js) class.
-2. **Task Creation**: When the user clicks **Start** on the UI ([app.js](./public/app.js)), a job model is instantiated via [Job.js](./src/common/Job.js) and written as a JSON file to the queue directory by [JobManager.js](./src/server/JobManager.js).
+2. **Task Creation**: When the user clicks **Start** on the UI ([app.js](./public/app.js)), [JobManager.js](./src/server/JobManager.js) validates the command, creates a tool-specific job id via [JobId.js](./src/common/JobId.js), and writes the job JSON file to the queue directory.
 3. **Task Receiving**: Worker daemon fetches new jobs via long-polling from the server, coordinated by [WorkerRegistry.js](./src/server/WorkerRegistry.js) and [JobFetcher.js](./src/worker/JobFetcher.js).
 4. **Task Running**: Once received, the worker calls [JobRunner.js](./src/worker/JobRunner.js) to run the Playwright test suite via a child process (`spawnSync`), then reports the status (`DONE` or `FAILED`) back to the server.
 5. **Report Serving & Viewing**: The UI page object [JobTable](./public/app.js) displays an **Open** button which loads the generated static HTML report from the sibling workspace into a preview iframe using [ReportViewer](./public/app.js).
@@ -44,10 +45,20 @@ The codebase operates on an OOP/POM event-driven file queue.
   * On startup, it ensures directories (`jobs/queue`, `jobs/running`, `jobs/results`) exist.
 
 ### 2. Task Creation
-* **Files involved**: [app.js](./public/app.js) (`RunnerForm`, `AppController`), [Server.js](./src/server/Server.js) (`POST /api/jobs`), [JobManager.js](./src/server/JobManager.js) (`addJob()`), [Job.js](./src/common/Job.js)
+* **Files involved**: [app.js](./public/app.js) (`RunnerForm`, `AppController`), [Server.js](./src/server/Server.js) (`POST /api/jobs`), [JobManager.js](./src/server/JobManager.js) (`addJob()`), [JobId.js](./src/common/JobId.js)
 * **Flow**:
   * The user fills out parameters in the browser form and clicks **Start**; `RunnerForm` captures inputs and `AppController` makes a POST request to `/api/jobs`.
   * The server parses this request, instantiates a `Job`, checks for active duplicate jobs, saves the job definition to `jobs/queue/<jobId>.json`, and triggers `WorkerRegistry.notify()` to alert any waiting workers.
+
+### Job ID Contract
+
+Job ids are tool-specific. The shared contract lives in [src/common/JobId.js](./src/common/JobId.js); do not duplicate regexes in server code.
+
+| Tool | Pattern name | Format |
+|---|---|---|
+| `aliveDaily` | `ALIVE_DAILY_JOB_ID_PATTERN` | `AL-YYYYMMDD-HHMMSS-brand-XX` |
+
+The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue files use `<jobId>.json`, and result/report lookups validate with `isValidJobId()` so future tool patterns can be added in the same registry. When adding a new server tool, add its pattern, format label, and generator to `JOB_ID_CONFIG_BY_TOOL` before wiring queue or report routes.
 
 ### 3. Task Receiving
 * **Files involved**: [Server.js](./src/server/Server.js) (`GET /api/jobs/next`), [WorkerRegistry.js](./src/server/WorkerRegistry.js), [JobFetcher.js](./src/worker/JobFetcher.js), [JobManager.js](./src/server/JobManager.js) (`claimNextJob()`)
@@ -60,6 +71,7 @@ The codebase operates on an OOP/POM event-driven file queue.
 * **Files involved**: [worker.mjs](./worker.mjs), [Worker.js](./src/worker/Worker.js), [JobRunner.js](./src/worker/JobRunner.js)
 * **Flow**:
   * Once the worker fetches a job, `Worker.js` verifies it and calls `JobRunner.run()`.
+  * `Worker.js` passes the job id to `scripts/run-domain-test.mjs` as both `--job-id <jobId>` and the `JOB_ID` environment variable.
   * `JobRunner` validates arguments and executes Playwright tests via `spawnSync` using `scripts/run-domain-test.mjs` located in the sibling `TS_PW_FBC` workspace.
   * When execution finishes, `Worker.js` posts results (`DONE` or `FAILED`) back to the server via `POST /api/jobs/complete`.
   * The server's `JobManager.completeJob()` updates the job status JSON, moves it to `jobs/results/`, deletes the temporary queue/running files, and syncs the active job state.
@@ -67,25 +79,76 @@ The codebase operates on an OOP/POM event-driven file queue.
 ### 5. Report Serving & Displaying
 * **Files involved**: [Server.js](./src/server/Server.js) (`GET /reports/*`), [app.js](./public/app.js) (`ReportViewer`, `JobTable`), [Config.js](./src/common/Config.js)
 * **Flow**:
-  * Playwright saves test results directly to `TS_PW_FBC/test-results/<brand>/report.html`.
+  * Playwright saves job-scoped test results to `TS_PW_FBC/test-results/<brand>/<jobId>/report.html` when `JOB_ID` is present, and falls back to `TS_PW_FBC/test-results/<brand>/report.html` for local runs without a job id.
   * The server routes any requests under `/reports/*` to serve these HTML assets statically from `Config.testResultsDir`.
   * When a job completes, the UI `JobTable` renders an **Open** button which maps to `ReportViewer.load()`, embedding the static report inside the preview iframe.
 
 
 
-## Configure
+## Configure via `.env`
 
-Set the test repository path when it is not the sibling default `D:\workspace\TS_PW_FBC`:
+Each role loads its own env file so the server and worker never clobber each
+other's config, even on the same machine:
+
+* `npm run start` → `node --env-file=server.env` (see `server.env.example`)
+* `npm run worker` → `node --env-file=worker.env` (see `worker.env.example`)
+
+Copy the matching template and fill in values for your machine before running
+anything (Node.js ≥ 20.6 — no dotenv needed):
 
 ```powershell
-$env:CENTER_RUNNER_TEST_REPO='D:\workspace\TS_PW_FBC'
+Copy-Item server.env.example server.env   # on the server machine
+Copy-Item worker.env.example worker.env   # on the worker machine
 ```
 
-## Run Web
+### Server env vars (`npm run start`)
 
-```powershell
-npm.cmd run start
-```
+| Variable | Default | Description |
+|---|---|---|
+| `CENTER_RUNNER_PORT` | `4317` | HTTP port the server listens on |
+| `CENTER_RUNNER_HOST` | `0.0.0.0` | Host binding |
+| `CENTER_RUNNER_TEST_REPO` | `../TS_PW_FBC` | Path to the Playwright test repo |
+| `CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS` | `60000` | Long-poll timeout in ms |
+
+### Worker env vars (`npm run worker`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `WORKER_IP` | `127.0.0.1` | IP of this worker machine |
+| `WORKER_NAME` | `worker-{ip}` | Display name of this worker |
+| `CENTER_RUNNER_IP` | *(empty)* | IP of the center server |
+| `CENTER_RUNNER_PORT` | `4317` | Port of the center server |
+| `CENTER_RUNNER_BASE_URL` | *(auto-built from IP+Port)* | Full base URL of center server |
+| `CENTER_RUNNER_COMMAND_SOURCE` | *(auto-built from base URL)* | Poll URL `/api/jobs/next` |
+| `CENTER_RUNNER_INTERVAL_MS` | `5000` | Polling interval in ms |
+| `CENTER_RUNNER_STATE_FILE` | `jobs/worker-state.json` | Last-run job state file |
+| `CENTER_RUNNER_RESULT_FILE` | `jobs/latest-result.json` | Latest result file |
+
+### Adding a new config variable
+
+Adding a variable to `.env` alone has **no effect** — the code must also read it.
+Follow these 4 steps every time:
+
+1. **Add to `.env`** with your real value:
+   ```
+   MY_NEW_VAR=some-value
+   ```
+2. **Add to `.env.example`** with an empty or safe default so others know the variable exists:
+   ```
+   MY_NEW_VAR=
+   ```
+3. **Register in code** — server-side vars go in `src/common/Config.js`, worker-side vars go in `src/worker/WorkerConfig.js`:
+   ```js
+   // Config.js (server)
+   myNewVar: process.env.MY_NEW_VAR || 'default-value',
+
+   // WorkerConfig.js (worker)
+   this.myNewVar = process.env.MY_NEW_VAR || 'default-value';
+   ```
+4. **Use the registered value** inside the relevant class (`Server.js`, `Worker.js`, etc.) via `config.myNewVar` or `this.config.myNewVar`.
+
+> **Rule**: `.env` is the data source. `Config.js` / `WorkerConfig.js` are the single place where every env var is declared and given a default.
+
 
 Open:
 
@@ -112,7 +175,7 @@ executes:
 node <CENTER_RUNNER_TEST_REPO>\scripts\run-domain-test.mjs <group> <brand> --grep <tag>
 ```
 
-Then it reports `DONE` or `FAILED` back to the server.
+For queued jobs the worker also passes `--job-id <jobId>` and `JOB_ID=<jobId>`. Then it reports `DONE` or `FAILED` back to the server.
 
 ## LAN Control
 
@@ -180,102 +243,48 @@ http://<test-machine-name>:4317/
 Keep `CENTER_RUNNER_HOST=0.0.0.0`; otherwise the server may only listen on
 `localhost` and remote Tailscale devices will not reach it.
 
-## Jenkins Worker With Secret .env
+## Quick Start via Batch Files
 
-Use this when the test repo needs a secret `.env` file for accounts, Google
-Sheet credentials, or other private test config.
-
-Helper batch files are available under `jenkins/`:
+Two batch files at the project root handle setup and launch automatically:
 
 ```text
-jenkins\prepare-secret-env.bat
-jenkins\install-deps.bat
-jenkins\start-server.bat
-jenkins\start-workers.bat
+start-server.bat
+start-workers.bat
 ```
 
-1. In Jenkins, create a secret file credential:
-   - Go to `Manage Jenkins` -> `Credentials`.
-   - Add credential with kind `Secret file`.
-   - Upload the real `TS_PW_FBC\.env` file.
-   - Set ID to `ALL_DOMAINS_ENV_FILE`.
-
-2. Create a Pipeline job that uses this repository.
-
-3. Set Pipeline script path to:
-
-```text
-jenkins/center-runner-worker.Jenkinsfile
-```
-
-4. Start the Center Runner server on the test machine:
+Start the server (double-click or run from cmd):
 
 ```cmd
 cd /d D:\workspace\center_Runner
-set CENTER_RUNNER_HOST=0.0.0.0
-set CENTER_RUNNER_PORT=4317
-set CENTER_RUNNER_TEST_REPO=D:\workspace\TS_PW_FBC
-npm.cmd run start
+start-server.bat
 ```
 
-5. Run the Jenkins worker job with these defaults:
-
-```text
-CENTER_RUNNER_ROOT=D:\workspace\center_Runner
-TEST_REPO_ROOT=D:\workspace\TS_PW_FBC
-CENTER_RUNNER_URL=http://localhost:4317
-WORKER_COUNT=1
-ENV_CREDENTIALS_ID=ALL_DOMAINS_ENV_FILE
-```
-
-The pipeline calls:
-
-```cmd
-jenkins\prepare-secret-env.bat
-jenkins\install-deps.bat
-jenkins\start-workers.bat
-```
-
-Increase `WORKER_COUNT` to run more queued jobs in parallel. The Jenkins build
-is intentionally long-running; keep it running while you want workers online,
-and stop the build when you want to stop workers.
-
-The pipeline copies the Jenkins secret file to:
-
-```text
-D:\workspace\TS_PW_FBC\.env
-```
-
-Do not print this file in logs and do not commit it to git.
-
-You can also run the same batch files manually from `cmd.exe`.
-
-Start the server:
+Start workers on the same or another machine:
 
 ```cmd
 cd /d D:\workspace\center_Runner
-set CENTER_RUNNER_HOST=0.0.0.0
-set CENTER_RUNNER_PORT=4317
-set TEST_REPO_ROOT=D:\workspace\TS_PW_FBC
-jenkins\start-server.bat
+start-workers.bat
 ```
 
-Start workers:
+Both scripts install npm dependencies automatically and read config from
+`server.env` / `worker.env` at the project root. Copy the matching template
+before first run:
 
-```cmd
-cd /d D:\workspace\center_Runner
-set TEST_REPO_ROOT=D:\workspace\TS_PW_FBC
-set CENTER_RUNNER_URL=http://localhost:4317
-set WORKER_COUNT=3
-jenkins\start-workers.bat
+```powershell
+Copy-Item server.env.example server.env
+Copy-Item worker.env.example worker.env
 ```
+
+Increase `WORKER_COUNT` in `worker.env` to run more queued jobs in parallel.
 
 ## Reports
 
 Reports are served from the test repo:
 
 ```text
-<CENTER_RUNNER_TEST_REPO>\test-results\<brand>\report.html
+<CENTER_RUNNER_TEST_REPO>\test-results\<brand>\<jobId>\report.html
 ```
+
+Local runs without `JOB_ID` continue to write to `<CENTER_RUNNER_TEST_REPO>\test-results\<brand>\report.html`.
 
 The web UI embeds the report into the blank report frame when the job finishes.

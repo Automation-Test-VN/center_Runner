@@ -1,21 +1,31 @@
 class DomainChecker {
-  normalizeUrl(value) {
-    return String(value || '').trim();
-  }
-
   async check(domainUrl) {
-    const url = this.normalizeUrl(domainUrl);
+    const url = this.normalizeUrl(String(domainUrl || ''));
+
     if (!/^https?:\/\/[^ "]+$/i.test(url)) {
-      return { ok: false, status: 0, message: 'Invalid URL.' };
+      return {
+        ok: false,
+        status: 0,
+        message: 'Invalid URL.'
+      };
     }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
     try {
-      let response = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: controller.signal });
+      let response = await fetch(url, {
+        method: 'HEAD',
+        redirect: 'follow',
+        signal: controller.signal
+      });
+
       if ([405, 403].includes(response.status)) {
-        response = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal });
+        response = await fetch(url, {
+          method: 'GET',
+          redirect: 'follow',
+          signal: controller.signal
+        });
       }
 
       return {
@@ -33,6 +43,10 @@ class DomainChecker {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  normalizeUrl(value) {
+    return value.trim();
   }
 }
 
