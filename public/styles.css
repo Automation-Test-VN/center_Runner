@@ -245,6 +245,35 @@ button:disabled {
   background-color: #ca6f1e;
 }
 
+.job-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.job-pagination-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.page-button {
+  min-width: 32px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.page-button[aria-current="page"] {
+  background: var(--accent);
+  color: #fff;
+}
+
 
 .report-panel {
   height: min(640px, calc(100vh - 190px));

@@ -50,7 +50,7 @@ popd
 
 echo.
 echo ============================================================
-echo STEP 4: STARTING SERVER
+echo STEP 4: LOAD SERVER CONFIGURATION
 echo ============================================================
 if exist "%SERVER_ENV_FILE%" (
   for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%SERVER_ENV_FILE%") do (
@@ -62,6 +62,22 @@ if "%CENTER_RUNNER_HOST%"=="" set "CENTER_RUNNER_HOST=0.0.0.0"
 if "%CENTER_RUNNER_PORT%"=="" set "CENTER_RUNNER_PORT=4317"
 if "%CENTER_RUNNER_TEST_REPO%"=="" set "CENTER_RUNNER_TEST_REPO=%TEST_REPO_ROOT%"
 
+echo.
+echo ============================================================
+echo STEP 5: START TAILSCALE FUNNEL IN BACKGROUND
+echo ============================================================
+where tailscale.exe >nul 2>nul
+if errorlevel 1 (
+    echo [WARNING] tailscale.exe not found. Skipping Tailscale funnel.
+) else (
+    echo [INFO] Starting Tailscale funnel for port 4317 in background...
+    start "Center Runner Tailscale Funnel" /B tailscale.exe funnel 4317
+)
+
+echo.
+echo ============================================================
+echo STEP 6: STARTING SERVER
+echo ============================================================
 echo [INFO] Starting Center Runner server on %CENTER_RUNNER_HOST%:%CENTER_RUNNER_PORT%
 echo [INFO] CENTER_RUNNER_TEST_REPO=%CENTER_RUNNER_TEST_REPO%
 

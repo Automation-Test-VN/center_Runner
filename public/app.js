@@ -112,15 +112,25 @@ class RunnerForm {
 }
 
 class JobTable {
-  constructor(tableBodySelector) {
+  constructor(tableBodySelector, paginationSelector) {
     this.tableBody = document.querySelector(tableBodySelector);
+    this.pagination = document.querySelector(paginationSelector);
+    this.maxJobs = 30;
+    this.pageSize = 15;
+    this.currentPage = 1;
   }
 
   render(jobs, onOpenReport, onAbortJob, onClearHistory) {
+    const visibleJobs = jobs.slice(0, this.maxJobs);
+    const pageCount = Math.max(1, Math.ceil(visibleJobs.length / this.pageSize));
+    this.currentPage = Math.min(this.currentPage, pageCount);
+    const pageStart = (this.currentPage - 1) * this.pageSize;
+    const pageJobs = visibleJobs.slice(pageStart, pageStart + this.pageSize);
+
     this.tableBody.innerHTML = '';
 
     // Render Clear History button row when there are finished (non-active) jobs
-    const finishedJobs = jobs.filter((job) => !job.active);
+    const finishedJobs = visibleJobs.filter((job) => !job.active);
     if (finishedJobs.length > 0 && onClearHistory) {
       const actionRow = document.createElement('tr');
       actionRow.className = 'history-action-row';
@@ -143,17 +153,18 @@ class JobTable {
       this.tableBody.append(actionRow);
     }
 
-    if (jobs.length === 0) {
+    if (visibleJobs.length === 0) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
       cell.colSpan = 7;
       cell.textContent = 'No jobs yet.';
       row.append(cell);
       this.tableBody.append(row);
+      this.renderPagination(visibleJobs.length, pageCount);
       return;
     }
 
-    for (const job of jobs) {
+    for (const job of pageJobs) {
       const row = document.createElement('tr');
       row.dataset.status = job.status || 'IDLE';
 
@@ -169,6 +180,46 @@ class JobTable {
 
       this.tableBody.append(row);
     }
+
+    this.renderPagination(visibleJobs.length, pageCount);
+  }
+
+  renderPagination(totalJobs, pageCount) {
+    if (!this.pagination) {
+      return;
+    }
+
+    this.pagination.innerHTML = '';
+
+    if (totalJobs === 0) {
+      return;
+    }
+
+    const status = document.createElement('span');
+    const pageStart = (this.currentPage - 1) * this.pageSize + 1;
+    const pageEnd = Math.min(this.currentPage * this.pageSize, totalJobs);
+    status.className = 'job-pagination-status';
+    status.textContent = `${pageStart}-${pageEnd} / ${totalJobs} jobs`;
+    this.pagination.append(status);
+
+    const buttonGroup = document.createElement('div');
+    buttonGroup.className = 'job-pagination-buttons';
+
+    for (let page = 1; page <= pageCount; page += 1) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'page-button';
+      button.textContent = String(page);
+      button.disabled = page === this.currentPage;
+      button.setAttribute('aria-current', page === this.currentPage ? 'page' : 'false');
+      button.addEventListener('click', () => {
+        this.currentPage = page;
+        this.onPageChange?.();
+      });
+      buttonGroup.append(button);
+    }
+
+    this.pagination.append(buttonGroup);
   }
 
   tableCell(value) {
@@ -273,7 +324,8 @@ class ReportViewer {
 class AppController {
   constructor() {
     this.form = new RunnerForm('#runner-form', (values) => this.startJob(values));
-    this.table = new JobTable('#job-list');
+    this.table = new JobTable('#job-list', '#job-pagination');
+    this.table.onPageChange = () => this.loadJobs();
     this.summary = new JobSummary({
       jobIdId: 'job-id',
       groupId: 'group-label',

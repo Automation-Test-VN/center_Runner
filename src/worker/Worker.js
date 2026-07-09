@@ -352,9 +352,8 @@ class Worker {
   }
 
   resolveReportHtmlPath(brand, jobId) {
-    const jobReportPath = path.join(this.config.testRepoRoot, 'test-results', brand, jobId, 'report.html');
-    if (jobId && fs.existsSync(jobReportPath)) {
-      return jobReportPath;
+    if (jobId) {
+      return path.join(this.config.testRepoRoot, 'test-results', brand, jobId, 'report.html');
     }
 
     return path.join(this.config.testRepoRoot, 'test-results', brand, 'report.html');
