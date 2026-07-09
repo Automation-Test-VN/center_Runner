@@ -29,7 +29,7 @@ Two entrypoints, one shared file-based queue. There is **no database and no mess
 
 ### The job lifecycle (file-queue state machine)
 
-A job is a JSON file named `CR-YYYYMMDD-HHMMSS-XXXX.json` that physically moves between directories as its status changes:
+A job is a JSON file named `<jobId>.json` that physically moves between directories as its status changes. Job id patterns are tool-specific and are centralized in `src/common/JobId.js`. The current `aliveDaily` id format is `AL-YYYYMMDD-HHMMSS-brand-XX` (`ALIVE_DAILY_JOB_ID_PATTERN`).
 
 ```
 POST /api/jobs      → jobs/queue/<id>.json      (status QUEUED)
@@ -43,23 +43,26 @@ Key mechanics to preserve:
 - **Long-polling**: if the queue is empty, `WorkerRegistry` holds the HTTP response open (default 60s, `CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS`) and replies `204` on timeout. `POST /api/jobs` calls `workerRegistry.notifyAll()` to immediately hand the new job to a waiting worker.
 - **Duplicate guard**: `addJob` rejects (HTTP 409) a job whose `{tool,group,brand,tag}` command matches an already active (queued/running) job.
 - **Worker idempotency**: each worker records the last job identity in a per-worker `jobs/worker-state-<name>.json` and skips re-processing the same identity.
+- **Job id registry**: create ids with `createJobIdForTool(tool, { brand, date })`; validate queue/result ids with `isValidJobId()` / `isValidJobFileName()`. When adding a new tool, add its pattern, format label, and generator to `JOB_ID_CONFIG_BY_TOOL` before changing queue, route, or report behavior.
 
-### The validation contract (duplicated — keep in sync)
+### The validation contract
 
 The command shape `{ tool: "aliveDaily", group: "fbc\d+", brand: "[a-z0-9-]+", tag: "@..." }` is validated with the **same regexes in multiple places**: `JobManager.buildJob` (server, on submit) and `Worker.validateCommand` (worker, before spawn). If you change a validation rule, change it in both. `tool` currently only supports `aliveDaily`.
+
+The `aliveDaily` job id contract is shared with `../TS_PW_FBC`: Center Runner sends the id as `--job-id <jobId>` and `JOB_ID=<jobId>`. TS_PW_FBC validates the same `AL-YYYYMMDD-HHMMSS-brand-XX` format in `scripts/run-domain-test.mjs`, `playwright.config.ts`, and `src/reporting/DiscordHelper.ts`; update those references when adding a new tool id format.
 
 The worker always spawns exactly this, never arbitrary shell (`Worker.buildRunner`):
 ```
 node <testRepoRoot>/scripts/run-domain-test.mjs <group> <brand> --grep <tag>
 ```
 
-### IMPORTANT: unwired OOP artifacts
+### IMPORTANT: partially wired OOP artifacts
 
-`src/common/Job.js`, `src/worker/JobFetcher.js`, and `src/worker/JobRunner.js` are **defined but not imported anywhere**. They are leftovers from an OOP refactor. The live logic they appear to own is actually inlined:
-- Job model / validation / ID generation → inlined in `JobManager` (server) and `Worker` (worker).
+`src/common/Job.js` now shares job id/report helpers from `src/common/JobId.js`, but runtime server job creation still happens in `JobManager.buildJob`. `src/worker/JobFetcher.js` and `src/worker/JobRunner.js` remain defined but not imported by the live worker loop. The live logic they appear to own is actually inlined:
+- Job creation / validation / queue writes -> `JobManager` (server) and `src/common/JobId.js` (id/report helpers).
 - Job fetching + runner spawning → inlined in `Worker` (`readJob`, `readRemoteJob`, `buildRunner`).
 
-Editing these three files changes nothing at runtime. When fixing behavior, edit `JobManager.js` / `Worker.js`; don't be misled by the README's flow diagrams, which describe the intended (not current) wiring.
+When fixing runtime behavior, verify whether the path is live before editing model/helper classes; don't be misled by older flow diagrams.
 
 ## Configuration
 

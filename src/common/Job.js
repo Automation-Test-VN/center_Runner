@@ -1,3 +1,5 @@
+import { createJobIdForTool, formatJobStamp, resolveReportUrl } from './JobId.js';
+
 class Job {
   constructor(data) {
     this.jobId = data.jobId;
@@ -42,8 +44,7 @@ class Job {
     }
 
     const now = new Date();
-    const suffix = Math.random().toString(36).slice(2, 4).toUpperCase();
-    const jobId = `AL-${Job.formatJobStamp(now)}-${brand}-${suffix}`;
+    const jobId = createJobIdForTool(tool, { brand, date: now });
 
     return new Job({
       jobId,
@@ -59,27 +60,11 @@ class Job {
   }
 
   static formatJobStamp(date) {
-    const pad = (value) => String(value).padStart(2, '0');
-    return [
-      date.getFullYear(),
-      pad(date.getMonth() + 1),
-      pad(date.getDate()),
-      '-',
-      pad(date.getHours()),
-      pad(date.getMinutes()),
-      pad(date.getSeconds())
-    ].join('');
+    return formatJobStamp(date);
   }
 
   static resolveReportUrl(command, jobId = '') {
-    const brand = String(command?.brand || '').trim().toLowerCase();
-    if (!/^[a-z0-9-]+$/.test(brand)) {
-      return null;
-    }
-    if (/^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}$/.test(jobId)) {
-      return `/reports/${brand}/${jobId}/report.html`;
-    }
-    return `/reports/${brand}/report.html`;
+    return resolveReportUrl(command, jobId);
   }
 
   toActiveJSON() {

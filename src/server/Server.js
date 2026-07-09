@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import config from '../common/Config.js';
+import { JOB_RESULT_PATH_PATTERN, isValidJobId } from '../common/JobId.js';
 import JobManager from './JobManager.js';
 import DomainChecker from './DomainChecker.js';
 import WorkerRegistry from './WorkerRegistry.js';
@@ -145,8 +146,12 @@ class Server {
       return this.sendJson(res, 200, { groups });
     }
 
-    const jobResultMatch = url.pathname.match(/^\/api\/jobs\/(AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2})\/result$/);
+    const jobResultMatch = url.pathname.match(JOB_RESULT_PATH_PATTERN);
     if (req.method === 'GET' && jobResultMatch) {
+      if (!isValidJobId(jobResultMatch[1])) {
+        return this.sendJson(res, 404, { error: 'No result found for job.' });
+      }
+
       const result = await this.jobManager.readJobResult(jobResultMatch[1]);
       return result
         ? this.sendJson(res, 200, result)

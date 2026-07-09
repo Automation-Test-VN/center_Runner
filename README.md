@@ -9,6 +9,7 @@ Standalone web queue and worker for running TS_PW_FBC domain tests.
 * [src/](./src/): Core OOP modules split into layers:
   * [common/Config.js](./src/common/Config.js): Configuration and path setup.
   * [common/Job.js](./src/common/Job.js): Job model and serialization.
+  * [common/JobId.js](./src/common/JobId.js): Tool-specific job id patterns, generators, validators, and report URL helpers.
   * [server/Server.js](./src/server/Server.js): HTTP router and static report server.
   * [server/JobManager.js](./src/server/JobManager.js): Filesystem job queue and result storage manager.
   * [server/DomainChecker.js](./src/server/DomainChecker.js): Preflight domain checking.
@@ -27,7 +28,7 @@ The codebase operates on an OOP/POM event-driven file queue.
 ### Core Flows Summary
 
 1. **Server Initialization**: Startup flow begins at [server.mjs](./server.mjs) which instantiates and launches the [Server.js](./src/server/Server.js) class.
-2. **Task Creation**: When the user clicks **Start** on the UI ([app.js](./public/app.js)), a job model is instantiated via [Job.js](./src/common/Job.js) and written as a JSON file to the queue directory by [JobManager.js](./src/server/JobManager.js).
+2. **Task Creation**: When the user clicks **Start** on the UI ([app.js](./public/app.js)), [JobManager.js](./src/server/JobManager.js) validates the command, creates a tool-specific job id via [JobId.js](./src/common/JobId.js), and writes the job JSON file to the queue directory.
 3. **Task Receiving**: Worker daemon fetches new jobs via long-polling from the server, coordinated by [WorkerRegistry.js](./src/server/WorkerRegistry.js) and [JobFetcher.js](./src/worker/JobFetcher.js).
 4. **Task Running**: Once received, the worker calls [JobRunner.js](./src/worker/JobRunner.js) to run the Playwright test suite via a child process (`spawnSync`), then reports the status (`DONE` or `FAILED`) back to the server.
 5. **Report Serving & Viewing**: The UI page object [JobTable](./public/app.js) displays an **Open** button which loads the generated static HTML report from the sibling workspace into a preview iframe using [ReportViewer](./public/app.js).
@@ -44,10 +45,20 @@ The codebase operates on an OOP/POM event-driven file queue.
   * On startup, it ensures directories (`jobs/queue`, `jobs/running`, `jobs/results`) exist.
 
 ### 2. Task Creation
-* **Files involved**: [app.js](./public/app.js) (`RunnerForm`, `AppController`), [Server.js](./src/server/Server.js) (`POST /api/jobs`), [JobManager.js](./src/server/JobManager.js) (`addJob()`), [Job.js](./src/common/Job.js)
+* **Files involved**: [app.js](./public/app.js) (`RunnerForm`, `AppController`), [Server.js](./src/server/Server.js) (`POST /api/jobs`), [JobManager.js](./src/server/JobManager.js) (`addJob()`), [JobId.js](./src/common/JobId.js)
 * **Flow**:
   * The user fills out parameters in the browser form and clicks **Start**; `RunnerForm` captures inputs and `AppController` makes a POST request to `/api/jobs`.
   * The server parses this request, instantiates a `Job`, checks for active duplicate jobs, saves the job definition to `jobs/queue/<jobId>.json`, and triggers `WorkerRegistry.notify()` to alert any waiting workers.
+
+### Job ID Contract
+
+Job ids are tool-specific. The shared contract lives in [src/common/JobId.js](./src/common/JobId.js); do not duplicate regexes in server code.
+
+| Tool | Pattern name | Format |
+|---|---|---|
+| `aliveDaily` | `ALIVE_DAILY_JOB_ID_PATTERN` | `AL-YYYYMMDD-HHMMSS-brand-XX` |
+
+The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue files use `<jobId>.json`, and result/report lookups validate with `isValidJobId()` so future tool patterns can be added in the same registry. When adding a new server tool, add its pattern, format label, and generator to `JOB_ID_CONFIG_BY_TOOL` before wiring queue or report routes.
 
 ### 3. Task Receiving
 * **Files involved**: [Server.js](./src/server/Server.js) (`GET /api/jobs/next`), [WorkerRegistry.js](./src/server/WorkerRegistry.js), [JobFetcher.js](./src/worker/JobFetcher.js), [JobManager.js](./src/server/JobManager.js) (`claimNextJob()`)
@@ -60,6 +71,7 @@ The codebase operates on an OOP/POM event-driven file queue.
 * **Files involved**: [worker.mjs](./worker.mjs), [Worker.js](./src/worker/Worker.js), [JobRunner.js](./src/worker/JobRunner.js)
 * **Flow**:
   * Once the worker fetches a job, `Worker.js` verifies it and calls `JobRunner.run()`.
+  * `Worker.js` passes the job id to `scripts/run-domain-test.mjs` as both `--job-id <jobId>` and the `JOB_ID` environment variable.
   * `JobRunner` validates arguments and executes Playwright tests via `spawnSync` using `scripts/run-domain-test.mjs` located in the sibling `TS_PW_FBC` workspace.
   * When execution finishes, `Worker.js` posts results (`DONE` or `FAILED`) back to the server via `POST /api/jobs/complete`.
   * The server's `JobManager.completeJob()` updates the job status JSON, moves it to `jobs/results/`, deletes the temporary queue/running files, and syncs the active job state.
@@ -67,7 +79,7 @@ The codebase operates on an OOP/POM event-driven file queue.
 ### 5. Report Serving & Displaying
 * **Files involved**: [Server.js](./src/server/Server.js) (`GET /reports/*`), [app.js](./public/app.js) (`ReportViewer`, `JobTable`), [Config.js](./src/common/Config.js)
 * **Flow**:
-  * Playwright saves test results directly to `TS_PW_FBC/test-results/<brand>/report.html`.
+  * Playwright saves job-scoped test results to `TS_PW_FBC/test-results/<brand>/<jobId>/report.html` when `JOB_ID` is present, and falls back to `TS_PW_FBC/test-results/<brand>/report.html` for local runs without a job id.
   * The server routes any requests under `/reports/*` to serve these HTML assets statically from `Config.testResultsDir`.
   * When a job completes, the UI `JobTable` renders an **Open** button which maps to `ReportViewer.load()`, embedding the static report inside the preview iframe.
 
@@ -163,7 +175,7 @@ executes:
 node <CENTER_RUNNER_TEST_REPO>\scripts\run-domain-test.mjs <group> <brand> --grep <tag>
 ```
 
-Then it reports `DONE` or `FAILED` back to the server.
+For queued jobs the worker also passes `--job-id <jobId>` and `JOB_ID=<jobId>`. Then it reports `DONE` or `FAILED` back to the server.
 
 ## LAN Control
 
@@ -270,7 +282,9 @@ Increase `WORKER_COUNT` in `worker.env` to run more queued jobs in parallel.
 Reports are served from the test repo:
 
 ```text
-<CENTER_RUNNER_TEST_REPO>\test-results\<brand>\report.html
+<CENTER_RUNNER_TEST_REPO>\test-results\<brand>\<jobId>\report.html
 ```
+
+Local runs without `JOB_ID` continue to write to `<CENTER_RUNNER_TEST_REPO>\test-results\<brand>\report.html`.
 
 The web UI embeds the report into the blank report frame when the job finishes.

@@ -22,5 +22,8 @@
 - The web server may create JSON command files.
 - A separate runner should claim a queued job, update status to `RUNNING`, execute Playwright, then write `DONE` or `FAILED`.
 - The runner should validate `group` with `/^fbc\d+$/`, `brand` with `/^[a-z0-9-]+$/`, and `tag` with `/^@[A-Za-z0-9_-]+$/` before spawning tests.
+- Job id patterns are per tool and live in `src/common/JobId.js`. The current `aliveDaily` id is named `ALIVE_DAILY_JOB_ID_PATTERN` and uses `AL-YYYYMMDD-HHMMSS-brand-XX`.
+- Create ids with `createJobIdForTool(tool, { brand, date })`; add new tools by extending `JOB_ID_CONFIG_BY_TOOL` with a new pattern, format label, and generator.
+- For queued runs, pass the claimed id to TS_PW_FBC as both `--job-id <jobId>` and `JOB_ID=<jobId>` so reports land under `test-results/<brand>/<jobId>/report.html`.
 - Never execute arbitrary shell text from the browser. Build command arguments from validated fields.
 - Avoid overlapping writes to the same command file; write to a temp file and rename for future queue implementations.
