@@ -39,6 +39,48 @@ h1 {
   letter-spacing: 0;
 }
 
+.domain-update-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f2b84b;
+  border-radius: 8px;
+  background: #fff8e6;
+  color: #713f12;
+}
+
+.domain-update-notice strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 14px;
+}
+
+.domain-update-notice p {
+  margin: 0;
+  color: #854d0e;
+  line-height: 1.4;
+}
+
+.domain-update-button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 9px 14px;
+  border: 1px solid #b45309;
+  border-radius: 6px;
+  background: #b45309;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.domain-update-button:hover {
+  background: #92400e;
+  color: #fff;
+}
+
 .domain-panel,
 .report-panel {
   background: var(--panel);
@@ -311,6 +353,15 @@ a {
 @media (max-width: 560px) {
   h1 {
     font-size: 20px;
+  }
+
+  .domain-update-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .domain-update-button {
+    text-align: center;
   }
 
   .domain-form {

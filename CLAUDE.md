@@ -26,6 +26,7 @@ Two entrypoints, one shared file-based queue. There is **no database and no mess
 
 - `server.mjs` → `src/server/Server.js`: raw `node:http` router (no framework). Serves `public/` static UI, proxies Playwright reports under `/reports/*` from the test repo's `test-results/`, and exposes the `/api/*` job endpoints.
 - `worker.mjs` → `src/worker/Worker.js`: polling loop. Long-polls `GET /api/jobs/next`, runs the job via `spawnSync(node, run-domain-test.mjs ...)` in the test repo, then `POST /api/jobs/complete`.
+- Before each real job, `Worker` serializes access to the configured test checkout with a lock under `jobs/`, runs `git pull --ff-only`, and holds the lock until the test child exits. Pull failures fail the job without running stale code; stale locks from dead local worker PIDs are removed automatically.
 
 ### The job lifecycle (file-queue state machine)
 
