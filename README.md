@@ -71,6 +71,7 @@ The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue f
 * **Files involved**: [worker.mjs](./worker.mjs), [Worker.js](./src/worker/Worker.js), [JobRunner.js](./src/worker/JobRunner.js)
 * **Flow**:
   * Once the worker fetches a job, `Worker.js` verifies it and calls `JobRunner.run()`.
+  * Before starting TS_PW_FBC, the worker acquires a shared repository lock and runs `git pull --ff-only` in the configured test repository. A pull failure marks the job as failed; the lock remains held until the test process exits so another worker cannot change the checkout mid-run.
   * `Worker.js` passes the job id to `scripts/run-domain-test.mjs` as both `--job-id <jobId>` and the `JOB_ID` environment variable.
   * `JobRunner` validates arguments and executes Playwright tests via `spawnSync` using `scripts/run-domain-test.mjs` located in the sibling `TS_PW_FBC` workspace.
   * When execution finishes, `Worker.js` posts results (`DONE` or `FAILED`) back to the server via `POST /api/jobs/complete`.
