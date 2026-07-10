@@ -8,20 +8,15 @@ class RunnerForm {
     this.toolInput = this.form.querySelector('#tool-name');
     this.groupInput = this.form.querySelector('#group-name');
     this.brandInput = this.form.querySelector('#brand-name');
-    this.domainInput = this.form.querySelector('#domain-url');
-    this.usernameInput = this.form.querySelector('#username');
-    this.passwordInput = this.form.querySelector('#password');
     this.startButton = this.form.querySelector('.start-button');
     
     this.brandGroups = [];
     this.onSubmit = onSubmit;
 
     this.initEvents();
-    this.syncToolState();
   }
 
   initEvents() {
-    this.toolInput.addEventListener('change', () => this.syncToolState());
     this.groupInput.addEventListener('change', () => this.syncBrandOptions());
     
     this.form.addEventListener('submit', async (event) => {
@@ -37,10 +32,7 @@ class RunnerForm {
       tool: this.toolInput.value,
       group: this.groupInput.value,
       brand: this.brandInput.value,
-      tag: '@smoke',
-      domainUrl: this.domainInput.value,
-      username: this.usernameInput.value,
-      password: this.passwordInput.value
+      tag: '@smoke'
     };
   }
 
@@ -81,19 +73,6 @@ class RunnerForm {
 
     // Trigger standard custom event to notify parent of changes
     this.brandInput.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  syncToolState() {
-    const usesFrameworkConfig = this.toolInput.value === 'aliveDaily';
-    this.domainInput.disabled = usesFrameworkConfig;
-    this.usernameInput.disabled = usesFrameworkConfig;
-    this.passwordInput.disabled = usesFrameworkConfig;
-    
-    if (usesFrameworkConfig) {
-      this.domainInput.value = '';
-      this.usernameInput.value = '';
-      this.passwordInput.value = '';
-    }
   }
 
   setStartButtonState(status) {
