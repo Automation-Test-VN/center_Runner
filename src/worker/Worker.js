@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 
+const SUPPORTED_TOOLS = new Set(['aliveDaily', 'checkAccess']);
+
 class Worker {
   constructor(config) {
     this.config = config;
@@ -188,16 +190,18 @@ class Worker {
     const finishedAt = new Date().toISOString();
 
     let reportHtml = null;
-    try {
-      const reportHtmlPath = this.resolveReportHtmlPath(job.command.brand, job.identity);
-      if (fs.existsSync(reportHtmlPath)) {
-        reportHtml = await fsp.readFile(reportHtmlPath, 'utf8');
-        console.log(`[CenterWorker] Successfully read report file: ${reportHtmlPath} (${reportHtml.length} bytes)`);
-      } else {
-        console.log(`[CenterWorker] Report file not found at: ${reportHtmlPath}`);
+    if (job.command.tool === 'aliveDaily') {
+      try {
+        const reportHtmlPath = this.resolveReportHtmlPath(job.command.brand, job.identity);
+        if (fs.existsSync(reportHtmlPath)) {
+          reportHtml = await fsp.readFile(reportHtmlPath, 'utf8');
+          console.log(`[CenterWorker] Successfully read report file: ${reportHtmlPath} (${reportHtml.length} bytes)`);
+        } else {
+          console.log(`[CenterWorker] Report file not found at: ${reportHtmlPath}`);
+        }
+      } catch (error) {
+        console.error(`[CenterWorker] Error reading report file: ${error.message}`);
       }
-    } catch (error) {
-      console.error(`[CenterWorker] Error reading report file: ${error.message}`);
     }
 
     const jobResult = {
@@ -429,17 +433,30 @@ class Worker {
     const command = rawCommand?.command && typeof rawCommand.command === 'object'
         ? rawCommand.command
         : rawCommand;
+    const tool = String(command?.tool || '').trim();
 
-    return {
-      tool: String(command?.tool || '').trim(),
-      group: String(command?.group || '').trim().toLowerCase(),
-      brand: String(command?.brand || '').trim().toLowerCase(),
-      tag: String(command?.tag || '@smoke').trim() || '@smoke'
+    const normalized = {
+      tool,
+      tag: String(command?.tag || (tool === 'checkAccess' ? '@checkAccess' : '@smoke')).trim()
     };
+
+    if (tool !== 'checkAccess') {
+      normalized.group = String(command?.group || '').trim().toLowerCase();
+      normalized.brand = String(command?.brand || '').trim().toLowerCase();
+    }
+
+    return normalized;
   }
 
   buildRunner(command, jobId = '') {
     this.validateCommand(command);
+
+    if (command.tool === 'checkAccess') {
+      return {
+        command: process.platform === 'win32' ? 'npm.cmd' : 'npm',
+        args: ['run', 'test', '--', '--grep', command.tag]
+      };
+    }
 
     const args = [
       path.join(this.config.testRepoRoot, 'scripts', 'run-domain-test.mjs'),
@@ -468,15 +485,15 @@ class Worker {
   }
 
   validateCommand(command) {
-    if (command.tool !== 'aliveDaily') {
+    if (!SUPPORTED_TOOLS.has(command.tool)) {
       throw new Error(`Unsupported tool: ${command.tool}`);
     }
 
-    if (!/^fbc\d+$/.test(command.group)) {
+    if (command.tool === 'aliveDaily' && !/^fbc\d+$/.test(command.group)) {
       throw new Error(`Invalid group: ${command.group}`);
     }
 
-    if (!/^[a-z0-9-]+$/.test(command.brand)) {
+    if (command.tool === 'aliveDaily' && !/^[a-z0-9-]+$/.test(command.brand)) {
       throw new Error(`Invalid brand: ${command.brand}`);
     }
 
@@ -484,16 +501,25 @@ class Worker {
       throw new Error(`Invalid tag: ${command.tag}`);
     }
 
-    const testDir = path.join(this.config.testRepoRoot, 'tests', command.group, command.brand);
-
-    if (!fs.existsSync(testDir)) {
-      throw new Error(`Test path not found: ${path.relative(this.config.testRepoRoot, testDir)}`);
+    const expectedTag = command.tool === 'checkAccess' ? '@checkAccess' : '@smoke';
+    if (command.tag !== expectedTag) {
+      throw new Error(`Invalid tag for ${command.tool}: ${command.tag}`);
     }
 
-    const runnerFile = path.join(this.config.testRepoRoot, 'scripts', 'run-domain-test.mjs');
+    if (command.tool === 'aliveDaily') {
+      const testDir = path.join(this.config.testRepoRoot, 'tests', command.group, command.brand);
 
-    if (!fs.existsSync(runnerFile)) {
-      throw new Error(`Runner file not found: ${path.relative(this.config.testRepoRoot, runnerFile)}`);
+      if (!fs.existsSync(testDir)) {
+        throw new Error(`Test path not found: ${path.relative(this.config.testRepoRoot, testDir)}`);
+      }
+    }
+
+    if (command.tool === 'aliveDaily') {
+      const runnerFile = path.join(this.config.testRepoRoot, 'scripts', 'run-domain-test.mjs');
+
+      if (!fs.existsSync(runnerFile)) {
+        throw new Error(`Runner file not found: ${path.relative(this.config.testRepoRoot, runnerFile)}`);
+      }
     }
   }
 

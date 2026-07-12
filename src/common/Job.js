@@ -1,4 +1,4 @@
-import { createJobIdForTool, formatJobStamp, resolveReportUrl } from './JobId.js';
+import { ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL, createJobIdForTool, formatJobStamp, resolveReportUrl } from './JobId.js';
 
 class Job {
   constructor(data) {
@@ -14,24 +14,21 @@ class Job {
     this.workerName = data.workerName || null;
   }
 
-  static fromPayload(payload, defaultTag = '@smoke') {
+  static fromPayload(payload) {
     const tool = String(payload.tool || '').trim();
     const group = String(payload.group || '').trim().toLowerCase();
     const brand = String(payload.brand || '').trim().toLowerCase();
-    const tag = String(payload.tag || defaultTag).trim() || defaultTag;
-    const domainUrl = String(payload.domainUrl || '').trim();
-    const username = String(payload.username || '').trim();
-    const password = String(payload.password || '');
+    const tag = tool === CHECK_ACCESS_TOOL ? '@checkAccess' : '@smoke';
 
-    if (tool !== 'aliveDaily') {
-      throw new Error('Unsupported tool. Currently only aliveDaily is available.');
+    if (![ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL].includes(tool)) {
+      throw new Error('Unsupported tool.');
     }
 
-    if (!/^fbc\d+$/.test(group)) {
+    if (tool === ALIVE_DAILY_TOOL && !/^fbc\d+$/.test(group)) {
       throw new Error('Group must use the fbc number format, for example fbc1.');
     }
 
-    if (!/^[a-z0-9-]+$/.test(brand)) {
+    if (tool === ALIVE_DAILY_TOOL && !/^[a-z0-9-]+$/.test(brand)) {
       throw new Error('Brand must contain only lowercase letters, numbers, and hyphens.');
     }
 
@@ -39,23 +36,17 @@ class Job {
       throw new Error('Tag must start with @ and contain only letters, numbers, underscore, or hyphen.');
     }
 
-    if (tool !== 'aliveDaily' && (!domainUrl || !username || !password)) {
-      throw new Error('Domain URL, username, and password are required for manual tools.');
-    }
-
     const now = new Date();
     const jobId = createJobIdForTool(tool, { brand, date: now });
+    const command = tool === CHECK_ACCESS_TOOL
+      ? { tool, tag }
+      : { tool, group, brand, tag };
 
     return new Job({
       jobId,
       createdAt: now.toISOString(),
       status: 'QUEUED',
-      command: {
-        tool,
-        group,
-        brand,
-        tag
-      }
+      command
     });
   }
 
