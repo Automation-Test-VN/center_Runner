@@ -71,13 +71,19 @@ class JobFetcher {
     const command = rawCommand?.command && typeof rawCommand.command === 'object'
       ? rawCommand.command
       : rawCommand;
+    const tool = String(command?.tool || '').trim();
 
-    return {
-      tool: String(command?.tool || '').trim(),
-      group: String(command?.group || '').trim().toLowerCase(),
-      brand: String(command?.brand || '').trim().toLowerCase(),
-      tag: String(command?.tag || '@smoke').trim() || '@smoke'
+    const normalized = {
+      tool,
+      tag: String(command?.tag || (tool === 'checkAccess' ? '@checkAccess' : '@smoke')).trim()
     };
+
+    if (tool !== 'checkAccess') {
+      normalized.group = String(command?.group || '').trim().toLowerCase();
+      normalized.brand = String(command?.brand || '').trim().toLowerCase();
+    }
+
+    return normalized;
   }
 
   hashCommand(command) {

@@ -18,6 +18,7 @@ class RunnerForm {
 
   initEvents() {
     this.groupInput.addEventListener('change', () => this.syncBrandOptions());
+    this.toolInput.addEventListener('change', () => this.syncToolFields());
     
     this.form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -27,9 +28,21 @@ class RunnerForm {
     });
   }
 
+  syncToolFields() {
+    const isCheckAccess = this.toolInput.value === 'checkAccess';
+    this.groupInput.disabled = isCheckAccess;
+    this.brandInput.disabled = isCheckAccess;
+  }
+
   getValues() {
+    const tool = this.toolInput.value;
+
+    if (tool === 'checkAccess') {
+      return { tool, tag: '@checkAccess' };
+    }
+
     return {
-      tool: this.toolInput.value,
+      tool,
       group: this.groupInput.value,
       brand: this.brandInput.value,
       tag: '@smoke'
@@ -40,6 +53,7 @@ class RunnerForm {
     this.brandGroups = groups;
     this.renderGroupOptions();
     this.syncBrandOptions();
+    this.syncToolFields();
   }
 
   renderGroupOptions() {
@@ -432,10 +446,12 @@ class AppController {
 
       this.summary.update({
         jobId: job.jobId,
-        group: job.command.group,
-        brand: job.command.brand,
+        group: job.command.group || '-',
+        brand: job.command.brand || '-',
         status: job.status,
-        note: `Queued ${job.command.group}/${job.command.brand}`
+        note: job.command.tool === 'checkAccess'
+          ? 'Queued Check Access'
+          : `Queued ${job.command.group}/${job.command.brand}`
       });
 
       await this.loadJobs();

@@ -1,6 +1,9 @@
 export const ALIVE_DAILY_TOOL = 'aliveDaily';
+export const CHECK_ACCESS_TOOL = 'checkAccess';
 export const ALIVE_DAILY_JOB_ID_PATTERN = /^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}$/;
 export const ALIVE_DAILY_JOB_ID_FORMAT = 'AL-YYYYMMDD-HHMMSS-brand-XX';
+export const CHECK_ACCESS_JOB_ID_PATTERN = /^CA-\d{8}-\d{6}-[A-Z0-9]{2}$/;
+export const CHECK_ACCESS_JOB_ID_FORMAT = 'CA-YYYYMMDD-HHMMSS-XX';
 
 export const JOB_RESULT_PATH_PATTERN = /^\/api\/jobs\/([^/]+)\/result$/;
 
@@ -13,6 +16,14 @@ const JOB_ID_CONFIG_BY_TOOL = new Map([
       const normalizedBrand = String(brand || '').trim().toLowerCase();
       const suffix = Math.random().toString(36).slice(2, 4).toUpperCase();
       return `AL-${formatJobStamp(date)}-${normalizedBrand}-${suffix}`;
+    }
+  }],
+  [CHECK_ACCESS_TOOL, {
+    pattern: CHECK_ACCESS_JOB_ID_PATTERN,
+    format: CHECK_ACCESS_JOB_ID_FORMAT,
+    create({ date = new Date() }) {
+      const suffix = Math.random().toString(36).slice(2, 4).toUpperCase();
+      return `CA-${formatJobStamp(date)}-${suffix}`;
     }
   }]
 ]);
