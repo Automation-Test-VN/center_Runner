@@ -39,13 +39,18 @@ class JobRunner {
   run(command, dryRun = false) {
     this.validate(command);
 
-    const runnerCommand = command.tool === 'checkAccess'
-      ? (process.platform === 'win32' ? 'npm.cmd' : 'npm')
-      : process.execPath;
+    let runnerCommand = process.execPath;
+    let runnerArgs = [config.testScriptPath, command.group, command.brand, '--grep', command.tag];
 
-    const runnerArgs = command.tool === 'checkAccess'
-      ? ['run', 'test', '--', '--grep', command.tag]
-      : [config.testScriptPath, command.group, command.brand, '--grep', command.tag];
+    if (command.tool === 'checkAccess') {
+      if (process.platform === 'win32') {
+        runnerCommand = process.env.ComSpec || 'cmd.exe';
+        runnerArgs = ['/d', '/s', '/c', 'npm.cmd run check:access'];
+      } else {
+        runnerCommand = 'npm';
+        runnerArgs = ['run', 'check:access'];
+      }
+    }
 
     if (dryRun) {
       console.log(`[JobRunner] [Dry Run] Would execute: ${runnerCommand} ${runnerArgs.join(' ')}`);

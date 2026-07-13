@@ -82,39 +82,31 @@ class Worker {
       runner = this.buildRunner(job.command, job.identity);
     } catch (error) {
       await this.releaseTestRepoLock(repoLock);
-      const failedResult = {
-        jobIdentity: job.identity,
-        jobId: job.identity,
-        workerIp: this.config.workerIp,
-        workerName: this.config.workerName,
-        testRepoRoot: this.config.testRepoRoot,
-        command: job.command,
-        status: 'FAILED',
-        exitCode: 1,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : String(error)
-      };
-
-      await this.writeJson(this.config.resultFile, failedResult);
-      await this.reportCompletion(this.config.source, failedResult);
-      await this.writeState(job.identity, failedResult.finishedAt);
-
+      await this.completeFailedJob(job, startedAt, error);
       throw error;
     }
 
     console.log(`[CenterWorker] Claimed job: ${job.identity}`);
     console.log(`[CenterWorker] Running: ${runner.command} ${runner.args.join(' ')}`);
 
-    const child = spawn(runner.command, runner.args, {
-      cwd: this.config.testRepoRoot,
-      env: {
-        ...process.env,
-        JOB_ID: job.identity
-      },
-      shell: false,
-      stdio: 'inherit'
-    });
+    let child = null;
+
+    try {
+      child = spawn(runner.command, runner.args, {
+        cwd: this.config.testRepoRoot,
+        env: {
+          ...process.env,
+          JOB_ID: job.identity
+        },
+        shell: false,
+        stdio: 'inherit'
+      });
+    } catch (error) {
+      await this.releaseTestRepoLock(repoLock);
+      repoLock = null;
+      await this.completeFailedJob(job, startedAt, error);
+      throw error;
+    }
 
     let isAborted = false;
     let pollInterval = null;
@@ -429,6 +421,26 @@ class Worker {
     }
   }
 
+  async completeFailedJob(job, startedAt, error) {
+    const failedResult = {
+      jobIdentity: job.identity,
+      jobId: job.identity,
+      workerIp: this.config.workerIp,
+      workerName: this.config.workerName,
+      testRepoRoot: this.config.testRepoRoot,
+      command: job.command,
+      status: 'FAILED',
+      exitCode: 1,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error)
+    };
+
+    await this.writeJson(this.config.resultFile, failedResult);
+    await this.reportCompletion(this.config.source, failedResult);
+    await this.writeState(job.identity, failedResult.finishedAt);
+  }
+
   normalizeCommand(rawCommand) {
     const command = rawCommand?.command && typeof rawCommand.command === 'object'
         ? rawCommand.command
@@ -452,9 +464,16 @@ class Worker {
     this.validateCommand(command);
 
     if (command.tool === 'checkAccess') {
+      if (process.platform === 'win32') {
+        return {
+          command: process.env.ComSpec || 'cmd.exe',
+          args: ['/d', '/s', '/c', 'npm.cmd run check:access']
+        };
+      }
+
       return {
-        command: process.platform === 'win32' ? 'npm.cmd' : 'npm',
-        args: ['run', 'test', '--', '--grep', command.tag]
+        command: 'npm',
+        args: ['run', 'check:access']
       };
     }
 
