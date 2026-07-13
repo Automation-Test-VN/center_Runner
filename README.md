@@ -16,9 +16,12 @@ Standalone web queue and worker for running TS_PW_FBC domain tests.
   * [server/WorkerRegistry.js](./src/server/WorkerRegistry.js): Workers queue and long polling manager.
   * [worker/Worker.js](./src/worker/Worker.js): Worker loop orchestrator.
   * [worker/WorkerConfig.js](./src/worker/WorkerConfig.js): Worker CLI argument parsing.
-  * [worker/JobFetcher.js](./src/worker/JobFetcher.js): Job retriever (URL/File).
-  * [worker/JobRunner.js](./src/worker/JobRunner.js): Playwright runner validation and child process spawner.
+  * [worker/JobFetcher.js](./src/worker/JobFetcher.js): Compatibility helper for job retrieval; the live loop currently inlines this behavior in `Worker.js`.
+  * [worker/JobRunner.js](./src/worker/JobRunner.js): Compatibility helper for runner validation/spawn; the live loop currently inlines this behavior in `Worker.js`.
 * [public/](./public/): Frontend UI files, using Page Object Model (POM) in [app.js](./public/app.js).
+* [AGENTS.md](./AGENTS.md): Standard Center Runner agent workflow and live architecture notes.
+* [.agents/rules/](./.agents/rules/): Durable engineering and skill-routing rules.
+* [.codex/agents/](./.codex/agents/): Read-only planner/reviewer and workspace-write implementer configurations.
 * [.codex/skills/center-runner-web/](./.codex/skills/center-runner-web/): AI guidelines for center runner.
 
 ## Core Flows & Architecture
@@ -29,8 +32,8 @@ The codebase operates on an OOP/POM event-driven file queue.
 
 1. **Server Initialization**: Startup flow begins at [server.mjs](./server.mjs) which instantiates and launches the [Server.js](./src/server/Server.js) class.
 2. **Task Creation**: When the user clicks **Start** on the UI ([app.js](./public/app.js)), [JobManager.js](./src/server/JobManager.js) validates the command, creates a tool-specific job id via [JobId.js](./src/common/JobId.js), and writes the job JSON file to the queue directory.
-3. **Task Receiving**: Worker daemon fetches new jobs via long-polling from the server, coordinated by [WorkerRegistry.js](./src/server/WorkerRegistry.js) and [JobFetcher.js](./src/worker/JobFetcher.js).
-4. **Task Running**: Once received, the worker calls [JobRunner.js](./src/worker/JobRunner.js) to run the Playwright test suite via a child process (`spawnSync`), then reports the status (`DONE` or `FAILED`) back to the server.
+3. **Task Receiving**: The live [Worker.js](./src/worker/Worker.js) loop fetches jobs via long-polling from the server, coordinated server-side by [WorkerRegistry.js](./src/server/WorkerRegistry.js).
+4. **Task Running**: Once received, `Worker.js` prepares the test checkout, builds a validated tool-specific child process, then reports status (`DONE` or `FAILED`) and report HTML back to the server.
 5. **Report Serving & Viewing**: The UI page object [JobTable](./public/app.js) displays an **Open** button which loads the generated static HTML report from the sibling workspace into a preview iframe using [ReportViewer](./public/app.js).
 
 ---
@@ -62,19 +65,19 @@ Job ids are tool-specific. The shared contract lives in [src/common/JobId.js](./
 The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue files use `<jobId>.json`, and result/report lookups validate with `isValidJobId()` so future tool patterns can be added in the same registry. When adding a new server tool, add its pattern, format label, and generator to `JOB_ID_CONFIG_BY_TOOL` before wiring queue or report routes.
 
 ### 3. Task Receiving
-* **Files involved**: [Server.js](./src/server/Server.js) (`GET /api/jobs/next`), [WorkerRegistry.js](./src/server/WorkerRegistry.js), [JobFetcher.js](./src/worker/JobFetcher.js), [JobManager.js](./src/server/JobManager.js) (`claimNextJob()`)
+* **Files involved**: [Server.js](./src/server/Server.js) (`GET /api/jobs/next`), [WorkerRegistry.js](./src/server/WorkerRegistry.js), [Worker.js](./src/worker/Worker.js), [JobManager.js](./src/server/JobManager.js) (`claimNextJob()`)
 * **Flow**:
   * The worker calls `JobFetcher.fetchJob()` pointing to `/api/jobs/next`.
   * If a job is queued, `JobManager.claimNextJob()` moves the JSON file from `jobs/queue/` to `jobs/running/`, sets its status to `RUNNING`, and returns the job to the worker.
   * If the queue is empty, `WorkerRegistry` holds the request connection open (long-polling) with a timeout of 60 seconds until a new job is added.
 
 ### 4. Task Running
-* **Files involved**: [worker.mjs](./worker.mjs), [Worker.js](./src/worker/Worker.js), [JobRunner.js](./src/worker/JobRunner.js)
+* **Files involved**: [worker.mjs](./worker.mjs), [Worker.js](./src/worker/Worker.js), [WorkerConfig.js](./src/worker/WorkerConfig.js)
 * **Flow**:
   * Once the worker fetches a job, `Worker.js` verifies it and calls `JobRunner.run()`.
   * Before starting TS_PW_FBC, the worker acquires a shared repository lock and runs `git pull --ff-only` in the configured test repository. A pull failure marks the job as failed; the lock remains held until the test process exits so another worker cannot change the checkout mid-run.
-  * `Worker.js` passes the job id to `scripts/run-domain-test.mjs` as both `--job-id <jobId>` and the `JOB_ID` environment variable.
-  * `JobRunner` validates arguments and executes Playwright tests via `spawnSync` using `scripts/run-domain-test.mjs` located in the sibling `TS_PW_FBC` workspace.
+  * `Worker.js` passes the job id through `JOB_ID`; aliveDaily also forwards `--job-id <jobId>` to `scripts/run-domain-test.mjs`.
+  * `Worker.js` validates the command and spawns either the aliveDaily Node runner or the checkAccess npm script in the sibling `TS_PW_FBC` workspace.
   * When execution finishes, `Worker.js` posts results (`DONE` or `FAILED`) back to the server via `POST /api/jobs/complete`.
   * The server's `JobManager.completeJob()` updates the job status JSON, moves it to `jobs/results/`, deletes the temporary queue/running files, and syncs the active job state.
 

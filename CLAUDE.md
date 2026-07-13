@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Center Runner is a standalone HTTP queue + worker daemon that runs Playwright "domain tests" from a **sibling** repo (`../TS_PW_FBC`, configurable). This repo contains **no test framework of its own** — there is no test runner, linter, or build step. The server hands jobs to workers; workers `spawnSync` a script inside the test repo. Node.js >= 20 required (uses native `fetch`, `--env-file`).
+Center Runner is a standalone HTTP queue + worker daemon that runs Playwright tools from a **sibling** repo (`../TS_PW_FBC`, configurable). This repo contains **no test framework of its own** — there is no test runner, linter, or build step. The server hands jobs to workers; workers spawn a tool-specific process inside the test repo. Node.js >= 20 is required.
 
 ## Commands
 
@@ -18,19 +18,19 @@ npm run worker:dry-run   # print the command that would run, spawn nothing (--on
 npm.cmd run worker -- --source http://localhost:4317/api/jobs/next
 ```
 
-Each role loads its own env file (so server and worker don't clobber each other on a shared machine): `npm run start` → `--env-file=server.env`, `npm run worker` → `--env-file=worker.env`. That file must exist or Node errors — copy `server.env.example` → `server.env` (server machine) and `worker.env.example` → `worker.env` (worker machine). There is no "run a single test" here — a single test *is* one job (`worker:once`), or a single Playwright run inside `../TS_PW_FBC`.
+The npm scripts use repo-local `server.env` / `worker.env` for manual development. Operational Windows startup uses `start-server.bat` and `start-workers.bat`, which load external files from `D:\workspace\env` and invoke Node directly. Trace the full batch-to-Node chain before changing env behavior.
 
 ## Architecture
 
 Two entrypoints, one shared file-based queue. There is **no database and no message broker** — job state lives entirely as JSON files under `jobs/` (gitignored). Coordination between server and worker is HTTP long-polling.
 
 - `server.mjs` → `src/server/Server.js`: raw `node:http` router (no framework). Serves `public/` static UI, proxies Playwright reports under `/reports/*` from the test repo's `test-results/`, and exposes the `/api/*` job endpoints.
-- `worker.mjs` → `src/worker/Worker.js`: polling loop. Long-polls `GET /api/jobs/next`, runs the job via `spawnSync(node, run-domain-test.mjs ...)` in the test repo, then `POST /api/jobs/complete`.
+- `worker.mjs` → `src/worker/Worker.js`: polling loop. Long-polls `GET /api/jobs/next`, prepares the test checkout, spawns the tool-specific child process, then posts completion and report data.
 - Before each real job, `Worker` serializes access to the configured test checkout with a lock under `jobs/`, runs `git pull --ff-only`, and holds the lock until the test child exits. Pull failures fail the job without running stale code; stale locks from dead local worker PIDs are removed automatically.
 
 ### The job lifecycle (file-queue state machine)
 
-A job is a JSON file named `<jobId>.json` that physically moves between directories as its status changes. Job id patterns are tool-specific and are centralized in `src/common/JobId.js`. The current `aliveDaily` id format is `AL-YYYYMMDD-HHMMSS-brand-XX` (`ALIVE_DAILY_JOB_ID_PATTERN`).
+A job is a JSON file named `<jobId>.json` that physically moves between directories as its status changes. Job id patterns are centralized in `src/common/JobId.js`: aliveDaily uses `AL-YYYYMMDD-HHMMSS-brand-XX`, and checkAccess uses `CA-YYYYMMDD-HHMMSS-XX`.
 
 ```
 POST /api/jobs      → jobs/queue/<id>.json      (status QUEUED)
@@ -48,13 +48,14 @@ Key mechanics to preserve:
 
 ### The validation contract
 
-The command shape `{ tool: "aliveDaily", group: "fbc\d+", brand: "[a-z0-9-]+", tag: "@..." }` is validated with the **same regexes in multiple places**: `JobManager.buildJob` (server, on submit) and `Worker.validateCommand` (worker, before spawn). If you change a validation rule, change it in both. `tool` currently only supports `aliveDaily`.
+AliveDaily uses `{ tool, group, brand, tag }`; checkAccess uses `{ tool, tag }`. Command rules are validated in both server creation and the live worker path. Keep duplicated helper validation aligned when these contracts change.
 
-The `aliveDaily` job id contract is shared with `../TS_PW_FBC`: Center Runner sends the id as `--job-id <jobId>` and `JOB_ID=<jobId>`. TS_PW_FBC validates the same `AL-YYYYMMDD-HHMMSS-brand-XX` format in `scripts/run-domain-test.mjs`, `playwright.config.ts`, and `src/reporting/DiscordHelper.ts`; update those references when adding a new tool id format.
+The job-id and report contract is shared with `../TS_PW_FBC`. AliveDaily forwards `--job-id` and `JOB_ID`; checkAccess uses `JOB_ID` with `REPORT_SCOPE=checkAccess`. Update validation, report routing, docs, skills, and references on both sides when this contract changes.
 
-The worker always spawns exactly this, never arbitrary shell (`Worker.buildRunner`):
+The worker builds one of these fixed command families and never executes arbitrary browser input (`Worker.buildRunner`):
 ```
-node <testRepoRoot>/scripts/run-domain-test.mjs <group> <brand> --grep <tag>
+aliveDaily:  node <testRepoRoot>/scripts/run-domain-test.mjs <group> <brand> --grep <tag> --job-id <jobId>
+checkAccess: npm run check:access (through cmd.exe on Windows)
 ```
 
 ### IMPORTANT: partially wired OOP artifacts
