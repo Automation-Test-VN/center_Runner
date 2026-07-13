@@ -53,17 +53,26 @@ export function getJobIdFormatForTool(tool) {
 }
 
 export function resolveReportUrl(command, jobId = '') {
-  const brand = String(command?.brand || '').trim().toLowerCase();
+  const reportNamespace = resolveReportNamespace(command);
 
-  if (!/^[a-z0-9-]+$/.test(brand)) {
+  if (!reportNamespace) {
     return null;
   }
 
   if (isValidJobId(jobId)) {
-    return `/reports/${brand}/${jobId}/report.html`;
+    return `/reports/${reportNamespace}/${jobId}/report.html`;
   }
 
-  return `/reports/${brand}/report.html`;
+  return `/reports/${reportNamespace}/report.html`;
+}
+
+export function resolveReportNamespace(command) {
+  if (String(command?.tool || '').trim() === CHECK_ACCESS_TOOL) {
+    return CHECK_ACCESS_TOOL;
+  }
+
+  const brand = String(command?.brand || '').trim().toLowerCase();
+  return /^[a-z0-9-]+$/.test(brand) ? brand : null;
 }
 
 export function formatJobStamp(date) {

@@ -182,18 +182,16 @@ class Worker {
     const finishedAt = new Date().toISOString();
 
     let reportHtml = null;
-    if (job.command.tool === 'aliveDaily') {
-      try {
-        const reportHtmlPath = this.resolveReportHtmlPath(job.command.brand, job.identity);
-        if (fs.existsSync(reportHtmlPath)) {
-          reportHtml = await fsp.readFile(reportHtmlPath, 'utf8');
-          console.log(`[CenterWorker] Successfully read report file: ${reportHtmlPath} (${reportHtml.length} bytes)`);
-        } else {
-          console.log(`[CenterWorker] Report file not found at: ${reportHtmlPath}`);
-        }
-      } catch (error) {
-        console.error(`[CenterWorker] Error reading report file: ${error.message}`);
+    try {
+      const reportHtmlPath = this.resolveReportHtmlPath(job.command, job.identity);
+      if (fs.existsSync(reportHtmlPath)) {
+        reportHtml = await fsp.readFile(reportHtmlPath, 'utf8');
+        console.log(`[CenterWorker] Successfully read report file: ${reportHtmlPath} (${reportHtml.length} bytes)`);
+      } else {
+        console.log(`[CenterWorker] Report file not found at: ${reportHtmlPath}`);
       }
+    } catch (error) {
+      console.error(`[CenterWorker] Error reading report file: ${error.message}`);
     }
 
     const jobResult = {
@@ -495,12 +493,14 @@ class Worker {
     };
   }
 
-  resolveReportHtmlPath(brand, jobId) {
+  resolveReportHtmlPath(command, jobId) {
+    const reportNamespace = command.tool === 'checkAccess' ? 'checkAccess' : command.brand;
+
     if (jobId) {
-      return path.join(this.config.testRepoRoot, 'test-results', brand, jobId, 'report.html');
+      return path.join(this.config.testRepoRoot, 'test-results', reportNamespace, jobId, 'report.html');
     }
 
-    return path.join(this.config.testRepoRoot, 'test-results', brand, 'report.html');
+    return path.join(this.config.testRepoRoot, 'test-results', reportNamespace, 'report.html');
   }
 
   validateCommand(command) {

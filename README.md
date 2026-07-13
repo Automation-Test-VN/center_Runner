@@ -57,6 +57,7 @@ Job ids are tool-specific. The shared contract lives in [src/common/JobId.js](./
 | Tool | Pattern name | Format |
 |---|---|---|
 | `aliveDaily` | `ALIVE_DAILY_JOB_ID_PATTERN` | `AL-YYYYMMDD-HHMMSS-brand-XX` |
+| `checkAccess` | `CHECK_ACCESS_JOB_ID_PATTERN` | `CA-YYYYMMDD-HHMMSS-XX` |
 
 The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue files use `<jobId>.json`, and result/report lookups validate with `isValidJobId()` so future tool patterns can be added in the same registry. When adding a new server tool, add its pattern, format label, and generator to `JOB_ID_CONFIG_BY_TOOL` before wiring queue or report routes.
 
@@ -80,7 +81,8 @@ The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue f
 ### 5. Report Serving & Displaying
 * **Files involved**: [Server.js](./src/server/Server.js) (`GET /reports/*`), [app.js](./public/app.js) (`ReportViewer`, `JobTable`), [Config.js](./src/common/Config.js)
 * **Flow**:
-  * Playwright saves job-scoped test results to `TS_PW_FBC/test-results/<brand>/<jobId>/report.html` when `JOB_ID` is present, and falls back to `TS_PW_FBC/test-results/<brand>/report.html` for local runs without a job id.
+  * Playwright saves aliveDaily reports to `TS_PW_FBC/test-results/<brand>/<jobId>/report.html` and checkAccess reports to `TS_PW_FBC/test-results/checkAccess/<jobId>/report.html`. Local runs without a job id use the corresponding namespace without the `<jobId>` segment.
+  * Workers upload the generated HTML to the server under the same namespace. The server stores it beneath `Config.testResultsDir` and returns a matching job-specific `reportUrl`.
   * The server routes any requests under `/reports/*` to serve these HTML assets statically from `Config.testResultsDir`.
   * When a job completes, the UI `JobTable` renders an **Open** button which maps to `ReportViewer.load()`, embedding the static report inside the preview iframe.
 

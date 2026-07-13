@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import config from '../common/Config.js';
-import { ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL, createJobIdForTool, formatJobStamp, isValidJobFileName, isValidJobId, resolveReportUrl } from '../common/JobId.js';
+import { ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL, createJobIdForTool, formatJobStamp, isValidJobFileName, isValidJobId, resolveReportNamespace, resolveReportUrl } from '../common/JobId.js';
 
 class JobManager {
   async addJob(payload) {
@@ -134,17 +134,15 @@ class JobManager {
     const existingJob = runningJob || queuedJob || existingResult || {};
 
     const command = payload.command || existingJob.command || null;
+    const reportNamespace = resolveReportNamespace(command);
 
-    if (payload.reportHtml && command?.brand) {
+    if (payload.reportHtml && reportNamespace) {
       try {
-        const brand = String(command.brand).trim().toLowerCase();
-        if (/^[a-z0-9-]+$/.test(brand)) {
-          const reportDestDir = path.join(config.testResultsDir, brand, jobId);
-          await fs.mkdir(reportDestDir, { recursive: true });
-          const reportDestPath = path.join(reportDestDir, 'report.html');
-          await fs.writeFile(reportDestPath, payload.reportHtml, 'utf8');
-          console.log(`[JobManager] Saved uploaded report for job ${jobId} to ${reportDestPath} (${payload.reportHtml.length} bytes)`);
-        }
+        const reportDestDir = path.join(config.testResultsDir, reportNamespace, jobId);
+        await fs.mkdir(reportDestDir, { recursive: true });
+        const reportDestPath = path.join(reportDestDir, 'report.html');
+        await fs.writeFile(reportDestPath, payload.reportHtml, 'utf8');
+        console.log(`[JobManager] Saved uploaded report for job ${jobId} to ${reportDestPath} (${payload.reportHtml.length} bytes)`);
       } catch (error) {
         console.error(`[JobManager] Failed to save uploaded report: ${error.message}`);
       }
