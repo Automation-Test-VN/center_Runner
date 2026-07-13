@@ -102,7 +102,7 @@ if %I% GTR %W_COUNT% goto LOOP_END
 set "CURRENT_WORKER_NAME=%WORKER_NAME%-%I%"
 echo Launching worker %I%/%W_COUNT%: %CURRENT_WORKER_NAME%
 start "center-runner-worker-%I%" cmd /k "set WORKER_NAME=%CURRENT_WORKER_NAME%&& node.exe .\worker.mjs --source "%CENTER_RUNNER_COMMAND_SOURCE%" --interval-ms "%CENTER_RUNNER_INTERVAL_MS%""
-set /a "I+=1"
+set /a "I+=3"
 goto LOOP_WORKERS
 
 :LOOP_END
