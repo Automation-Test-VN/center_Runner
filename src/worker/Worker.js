@@ -74,14 +74,10 @@ class Worker {
     const startedAt = new Date().toISOString();
 
     let runner = null;
-    let repoLock = null;
 
     try {
-      repoLock = await this.acquireTestRepoLock();
-      await this.pullTestRepo();
       runner = this.buildRunner(job.command, job.identity);
     } catch (error) {
-      await this.releaseTestRepoLock(repoLock);
       await this.completeFailedJob(job, startedAt, error);
       throw error;
     }
@@ -102,8 +98,6 @@ class Worker {
         stdio: 'inherit'
       });
     } catch (error) {
-      await this.releaseTestRepoLock(repoLock);
-      repoLock = null;
       await this.completeFailedJob(job, startedAt, error);
       throw error;
     }
@@ -149,9 +143,6 @@ class Worker {
         resolve(1);
       });
     });
-
-    await this.releaseTestRepoLock(repoLock);
-    repoLock = null;
 
     if (pollInterval) {
       clearInterval(pollInterval);
@@ -223,107 +214,6 @@ class Worker {
 
     console.log(`[CenterWorker] ${status} exitCode=${exitCode}`);
     return true;
-  }
-
-  async acquireTestRepoLock() {
-    const repoKey = createHash('sha256')
-        .update(this.config.testRepoRoot.toLowerCase())
-        .digest('hex')
-        .slice(0, 12);
-    const lockPath = path.join(this.config.jobsDir, `test-repo-${repoKey}.lock`);
-
-    console.log(`[CenterWorker] Waiting for test repo lock: ${lockPath}`);
-
-    for (;;) {
-      try {
-        const handle = await fsp.open(lockPath, 'wx');
-        await handle.writeFile(JSON.stringify({
-          pid: process.pid,
-          workerName: this.config.workerName,
-          testRepoRoot: this.config.testRepoRoot,
-          acquiredAt: new Date().toISOString()
-        }));
-        console.log('[CenterWorker] Test repo lock acquired.');
-        return { handle, lockPath };
-      } catch (error) {
-        if (error?.code !== 'EEXIST') {
-          throw new Error(`Cannot acquire test repo lock: ${error.message}`);
-        }
-
-        if (await this.clearStaleTestRepoLock(lockPath)) {
-          continue;
-        }
-
-        await this.delay(1000);
-      }
-    }
-  }
-
-  async clearStaleTestRepoLock(lockPath) {
-    try {
-      const lock = JSON.parse(await fsp.readFile(lockPath, 'utf8'));
-      const ownerPid = Number(lock.pid);
-
-      if (Number.isInteger(ownerPid) && ownerPid > 0) {
-        try {
-          process.kill(ownerPid, 0);
-          return false;
-        } catch (error) {
-          if (error?.code === 'EPERM') {
-            return false;
-          }
-        }
-      }
-
-      await fsp.unlink(lockPath);
-      console.log(`[CenterWorker] Removed stale test repo lock from PID ${lock.pid || 'unknown'}.`);
-      return true;
-    } catch (error) {
-      if (error?.code === 'ENOENT') {
-        return true;
-      }
-
-      return false;
-    }
-  }
-
-  async releaseTestRepoLock(lock) {
-    if (!lock) {
-      return;
-    }
-
-    try {
-      await lock.handle.close();
-    } finally {
-      await fsp.unlink(lock.lockPath).catch((error) => {
-        if (error?.code !== 'ENOENT') {
-          console.error(`[CenterWorker] Cannot remove test repo lock: ${error.message}`);
-        }
-      });
-    }
-
-    console.log('[CenterWorker] Test repo lock released.');
-  }
-
-  async pullTestRepo() {
-    console.log(`[CenterWorker] Updating test repo: git pull --ff-only (${this.config.testRepoRoot})`);
-
-    const exitCode = await new Promise((resolve, reject) => {
-      const child = spawn('git', ['pull', '--ff-only'], {
-        cwd: this.config.testRepoRoot,
-        shell: false,
-        stdio: 'inherit'
-      });
-
-      child.on('close', (code) => resolve(code ?? 1));
-      child.on('error', reject);
-    });
-
-    if (exitCode !== 0) {
-      throw new Error(`git pull --ff-only failed with exit code ${exitCode}.`);
-    }
-
-    console.log('[CenterWorker] Test repo updated successfully.');
   }
 
   async readJob(source) {

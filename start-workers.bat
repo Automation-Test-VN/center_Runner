@@ -91,7 +91,15 @@ exit /b 1
 :STEP4_START
 echo.
 echo ============================================================
-echo STEP 5: STARTING WORKERS
+echo STEP 5: STARTING TEST REPO AUTO-UPDATER
+echo ============================================================
+pushd "%CENTER_RUNNER_ROOT%"
+start "center-runner-repo-updater" cmd /k "node.exe .\update-test-repo.mjs"
+popd
+
+echo.
+echo ============================================================
+echo STEP 6: STARTING WORKERS
 echo ============================================================
 pushd "%CENTER_RUNNER_ROOT%"
 set /a "W_COUNT=%WORKER_COUNT%"
@@ -102,7 +110,7 @@ if %I% GTR %W_COUNT% goto LOOP_END
 set "CURRENT_WORKER_NAME=%WORKER_NAME%-%I%"
 echo Launching worker %I%/%W_COUNT%: %CURRENT_WORKER_NAME%
 start "center-runner-worker-%I%" cmd /k "set WORKER_NAME=%CURRENT_WORKER_NAME%&& node.exe .\worker.mjs --source "%CENTER_RUNNER_COMMAND_SOURCE%" --interval-ms "%CENTER_RUNNER_INTERVAL_MS%""
-set /a "I+=3"
+set /a "I+=1"
 goto LOOP_WORKERS
 
 :LOOP_END

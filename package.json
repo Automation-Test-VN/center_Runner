@@ -8,7 +8,8 @@
     "start": "node --env-file=server.env ./server.mjs",
     "worker": "node --env-file=worker.env ./worker.mjs",
     "worker:once": "node --env-file=worker.env ./worker.mjs --once",
-    "worker:dry-run": "node --env-file=worker.env ./worker.mjs --once --dry-run"
+    "worker:dry-run": "node --env-file=worker.env ./worker.mjs --once --dry-run",
+    "update-test-repo": "node --env-file=worker.env ./update-test-repo.mjs"
   },
   "engines": {
     "node": ">=20"
