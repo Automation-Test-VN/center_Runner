@@ -66,8 +66,14 @@ if "%CENTER_RUNNER_URL%"=="" set "CENTER_RUNNER_URL=http://localhost:4317"
 if "%CENTER_RUNNER_COMMAND_SOURCE%"=="" set "CENTER_RUNNER_COMMAND_SOURCE=%CENTER_RUNNER_URL%/api/jobs/next"
 if "%WORKER_IP%"=="" set "WORKER_IP=127.0.0.1"
 if "%WORKER_NAME%"=="" set "WORKER_NAME=worker-local"
-if "%WORKER_COUNT%"=="" set "WORKER_COUNT=3"
 if "%CENTER_RUNNER_INTERVAL_MS%"=="" set "CENTER_RUNNER_INTERVAL_MS=5000"
+
+if "%WORKER_COUNT%"=="" (
+    echo [ERROR] WORKER_COUNT is not set.
+    echo Add a line like "WORKER_COUNT=3" to %WORKER_ENV_FILE%.
+    pause
+    exit /b 1
+)
 
 echo [INFO] Checking network connection to Center Server at: %CENTER_RUNNER_URL%
 
