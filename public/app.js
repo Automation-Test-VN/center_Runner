@@ -162,7 +162,7 @@ class JobTable {
       row.dataset.status = job.status || 'IDLE';
 
       row.append(
-        this.tableCell(job.jobId || '-'),
+        this.tableCell(job.reportJobId || job.jobId || '-'),
         this.tableCell(job.command?.group || '-'),
         this.tableCell(job.command?.brand || '-'),
         this.statusCell(job.status || '-'),
@@ -365,7 +365,7 @@ class AppController {
       this.table.render(
         jobs,
         (job) => {
-          this.reportViewer.load(job.reportUrl, job.jobId);
+          this.reportViewer.load(job.reportUrl, job.reportJobId || job.jobId);
         },
         (job) => {
           this.abortJob(job);

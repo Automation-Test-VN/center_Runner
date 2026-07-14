@@ -4,6 +4,9 @@ export const ALIVE_DAILY_JOB_ID_PATTERN = /^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2
 export const ALIVE_DAILY_JOB_ID_FORMAT = 'AL-YYYYMMDD-HHMMSS-brand-XX';
 export const CHECK_ACCESS_JOB_ID_PATTERN = /^CA-\d{8}-\d{6}-[A-Z0-9]{2}$/;
 export const CHECK_ACCESS_JOB_ID_FORMAT = 'CA-YYYYMMDD-HHMMSS-XX';
+// checkAccess report ids append the reporting worker's ISP (WORKER_ISP), known only once a
+// worker claims the job — so this is derived at run time, never used as the queue/result file id.
+export const CHECK_ACCESS_REPORT_JOB_ID_PATTERN = /^CA-\d{8}-\d{6}-[A-Z0-9]{2}-[A-Z0-9]+$/;
 
 export const JOB_RESULT_PATH_PATTERN = /^\/api\/jobs\/([^/]+)\/result$/;
 
@@ -44,6 +47,29 @@ export function isValidJobFileName(fileName) {
   return value.endsWith('.json') && isValidJobId(value.slice(0, -'.json'.length));
 }
 
+export function normalizeIspTag(isp) {
+  return String(isp || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+// Only checkAccess ids get an ISP suffix, and only once a worker (which knows its own
+// WORKER_ISP) has claimed the job. jobId must already be a valid checkAccess id.
+export function buildCheckAccessReportJobId(jobId, isp) {
+  const ispTag = normalizeIspTag(isp);
+
+  if (!ispTag || !isValidJobIdForTool(CHECK_ACCESS_TOOL, jobId)) {
+    return jobId;
+  }
+
+  return `${jobId}-${ispTag}`;
+}
+
+// Accepts either a canonical job id or a checkAccess id with an ISP suffix appended,
+// for use anywhere a report path/URL is derived instead of a queue/result file lookup.
+export function isValidReportJobId(jobId) {
+  const value = String(jobId || '');
+  return isValidJobId(value) || CHECK_ACCESS_REPORT_JOB_ID_PATTERN.test(value);
+}
+
 export function createJobIdForTool(tool, options) {
   return getJobIdConfig(tool).create(options);
 }
@@ -59,7 +85,7 @@ export function resolveReportUrl(command, jobId = '') {
     return null;
   }
 
-  if (isValidJobId(jobId)) {
+  if (isValidReportJobId(jobId)) {
     return `/reports/${reportNamespace}/${jobId}/report.html`;
   }
 

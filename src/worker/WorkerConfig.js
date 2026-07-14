@@ -17,6 +17,7 @@ class WorkerConfig {
 
     this.workerIp = process.env.WORKER_IP || '127.0.0.1';
     this.workerName = process.env.WORKER_NAME || `worker-${this.workerIp.replaceAll('.', '-')}`;
+    this.workerIsp = String(process.env.WORKER_ISP || '').trim();
 
     this.safeWorkerName = this.workerName.replace(/[^a-zA-Z0-9_-]/g, '-');
 

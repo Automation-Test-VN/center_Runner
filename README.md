@@ -67,6 +67,8 @@ Job ids are tool-specific. The shared contract lives in [src/common/JobId.js](./
 
 The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue files use `<jobId>.json`, and result/report lookups validate with `isValidJobId()` so future tool patterns can be added in the same registry. When adding a new server tool, add its pattern, format label, and generator to `JOB_ID_CONFIG_BY_TOOL` before wiring queue or report routes.
 
+**checkAccess report ids get an ISP suffix.** One server can have workers on different network lines, so the queue/running/result file identity (`CA-YYYYMMDD-HHMMSS-XX`) always stays canonical and unsuffixed — that id is only known once the job is *created*, before any worker has claimed it. Each worker, however, knows its own `WORKER_ISP` env var. When a worker claims a checkAccess job it derives a **report job id** (`buildCheckAccessReportJobId()` in `JobId.js`, pattern `CHECK_ACCESS_REPORT_JOB_ID_PATTERN`: `CA-YYYYMMDD-HHMMSS-XX-ISP`) and uses that — not the canonical id — for the `JOB_ID` env var it hands to the test repo, for the local report file lookup, and for the `reportJobId` field it sends back in `POST /api/jobs/complete`. The server stores/serves the uploaded report under that suffixed folder and builds `reportUrl` from it, while `jobId` in the result stays canonical. If `WORKER_ISP` is unset, `reportJobId` just equals the canonical `jobId` (no suffix).
+
 ### 3. Task Receiving
 * **Files involved**: [Server.js](./src/server/Server.js) (`GET /api/jobs/next`), [WorkerRegistry.js](./src/server/WorkerRegistry.js), [Worker.js](./src/worker/Worker.js), [JobManager.js](./src/server/JobManager.js) (`claimNextJob()`)
 * **Flow**:
@@ -79,7 +81,7 @@ The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue f
 * **Flow**:
   * Once the worker fetches a job, `Worker.js` verifies it and calls `JobRunner.run()`.
   * `Worker.js` no longer pulls or locks the test checkout itself — it spawns the test process immediately against whatever code is currently on disk in `TEST_REPO_ROOT`. Multiple workers therefore run fully in parallel with no shared lock. Keeping the checkout up to date is the separate [`update-test-repo.mjs`](./update-test-repo.mjs) daemon described under "Test repo auto-updater".
-  * `Worker.js` passes the job id through `JOB_ID`; aliveDaily also forwards `--job-id <jobId>` to `scripts/run-domain-test.mjs`.
+  * `Worker.js` passes the job id through `JOB_ID`; aliveDaily also forwards `--job-id <jobId>` to `scripts/run-domain-test.mjs`. For checkAccess, `JOB_ID` is the ISP-suffixed **report job id** (see "Job Ids" above), not the canonical queue/result id.
   * `Worker.js` validates the command and spawns either the aliveDaily Node runner or the checkAccess npm script in the sibling `TS_PW_FBC` workspace.
   * When execution finishes, `Worker.js` posts results (`DONE` or `FAILED`) back to the server via `POST /api/jobs/complete`.
   * The server's `JobManager.completeJob()` updates the job status JSON, moves it to `jobs/results/`, deletes the temporary queue/running files, and syncs the active job state.
@@ -125,6 +127,7 @@ Copy-Item worker.env.example worker.env   # on the worker machine
 |---|---|---|
 | `WORKER_IP` | `127.0.0.1` | IP of this worker machine |
 | `WORKER_NAME` | `worker-{ip}` | Display name of this worker |
+| `WORKER_ISP` | *(empty)* | ISP/network line of this worker machine. When set, checkAccess job ids get this appended (uppercased, non-alphanumerics stripped) to build the report job id — see "Job Ids" above. Unused for aliveDaily. |
 | `CENTER_RUNNER_IP` | *(empty)* | IP of the center server |
 | `CENTER_RUNNER_PORT` | `4317` | Port of the center server |
 | `CENTER_RUNNER_BASE_URL` | *(auto-built from IP+Port)* | Full base URL of center server |

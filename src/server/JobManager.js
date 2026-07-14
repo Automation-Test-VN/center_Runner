@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import config from '../common/Config.js';
-import { ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL, createJobIdForTool, formatJobStamp, isValidJobFileName, isValidJobId, resolveReportNamespace, resolveReportUrl } from '../common/JobId.js';
+import { ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL, createJobIdForTool, formatJobStamp, isValidJobFileName, isValidJobId, isValidReportJobId, resolveReportNamespace, resolveReportUrl } from '../common/JobId.js';
 
 class JobManager {
   async addJob(payload) {
@@ -140,6 +140,12 @@ class JobManager {
       throw new Error('Invalid jobId.');
     }
 
+    // reportJobId may carry an ISP suffix (checkAccess only) appended by the worker that
+    // ran the job. It is only ever used to locate/build the report; the canonical jobId
+    // above remains the queue/running/result file identity.
+    const rawReportJobId = String(payload.reportJobId || '').trim();
+    const reportJobId = isValidReportJobId(rawReportJobId) ? rawReportJobId : jobId;
+
     if (!['DONE', 'FAILED'].includes(status)) {
       throw new Error('Invalid job status.');
     }
@@ -158,7 +164,7 @@ class JobManager {
 
     if (payload.reportHtml && reportNamespace) {
       try {
-        const reportDestDir = path.join(config.testResultsDir, reportNamespace, jobId);
+        const reportDestDir = path.join(config.testResultsDir, reportNamespace, reportJobId);
         await fs.mkdir(reportDestDir, { recursive: true });
         const reportDestPath = path.join(reportDestDir, 'report.html');
         await fs.writeFile(reportDestPath, payload.reportHtml, 'utf8');
@@ -171,6 +177,7 @@ class JobManager {
     const result = {
       ...existingResult,
       jobId,
+      reportJobId,
       status,
       exitCode,
       command,
@@ -180,7 +187,7 @@ class JobManager {
       createdAt: existingJob.createdAt || existingResult?.createdAt || null,
       startedAt: payload.startedAt || existingJob.startedAt || existingResult?.startedAt || null,
       finishedAt: payload.finishedAt || new Date().toISOString(),
-      reportUrl: this.resolveReportUrl(command, jobId)
+      reportUrl: this.resolveReportUrl(command, reportJobId)
     };
 
     await this.ensureJobDirs();
