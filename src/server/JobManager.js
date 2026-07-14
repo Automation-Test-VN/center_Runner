@@ -66,14 +66,15 @@ class JobManager {
 
     const entries = await fs.readdir(config.queuedJobsDir, { withFileTypes: true }).catch(() => []);
 
-    const queuedFiles = entries
+    const fileNames = entries
       .filter((entry) => entry.isFile() && isValidJobFileName(entry.name))
-      .map((entry) => entry.name)
-      .sort();
+      .map((entry) => entry.name);
 
-    if (queuedFiles.length === 0) {
+    if (fileNames.length === 0) {
       return null;
     }
+
+    const queuedFiles = await this.sortQueuedFilesByCreatedAt(fileNames);
 
     for (const fileName of queuedFiles) {
       const queuedPath = path.join(config.queuedJobsDir, fileName);
@@ -109,6 +110,25 @@ class JobManager {
     }
 
     return null;
+  }
+
+  async sortQueuedFilesByCreatedAt(fileNames) {
+    const withCreatedAt = await Promise.all(fileNames.map(async (fileName) => {
+      let createdAtMs = 0;
+
+      try {
+        const raw = await fs.readFile(path.join(config.queuedJobsDir, fileName), 'utf8');
+        createdAtMs = Date.parse(JSON.parse(raw)?.createdAt || '') || 0;
+      } catch {
+        createdAtMs = 0;
+      }
+
+      return { fileName, createdAtMs };
+    }));
+
+    return withCreatedAt
+      .sort((a, b) => a.createdAtMs - b.createdAtMs || a.fileName.localeCompare(b.fileName))
+      .map((entry) => entry.fileName);
   }
 
   async completeJob(payload) {

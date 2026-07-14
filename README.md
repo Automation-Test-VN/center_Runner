@@ -18,6 +18,9 @@ Standalone web queue and worker for running TS_PW_FBC domain tests.
   * [worker/WorkerConfig.js](./src/worker/WorkerConfig.js): Worker CLI argument parsing.
   * [worker/JobFetcher.js](./src/worker/JobFetcher.js): Compatibility helper for job retrieval; the live loop currently inlines this behavior in `Worker.js`.
   * [worker/JobRunner.js](./src/worker/JobRunner.js): Compatibility helper for runner validation/spawn; the live loop currently inlines this behavior in `Worker.js`.
+  * [updater/RepoUpdater.js](./src/updater/RepoUpdater.js): Standalone loop that `git pull --ff-only`s the test repo only when `jobs/running/` is empty, so it never races a running job.
+  * [updater/RepoUpdaterConfig.js](./src/updater/RepoUpdaterConfig.js): CLI/env config for the updater (`update-test-repo.mjs`).
+* [update-test-repo.mjs](./update-test-repo.mjs): Entrypoint for the test-repo auto-updater daemon (see "Test repo auto-updater" below).
 * [public/](./public/): Frontend UI files, using Page Object Model (POM) in [app.js](./public/app.js).
 * [AGENTS.md](./AGENTS.md): Standard Center Runner agent workflow and live architecture notes.
 * [.agents/rules/](./.agents/rules/): Durable engineering and skill-routing rules.
@@ -75,7 +78,7 @@ The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue f
 * **Files involved**: [worker.mjs](./worker.mjs), [Worker.js](./src/worker/Worker.js), [WorkerConfig.js](./src/worker/WorkerConfig.js)
 * **Flow**:
   * Once the worker fetches a job, `Worker.js` verifies it and calls `JobRunner.run()`.
-  * Before starting TS_PW_FBC, the worker acquires a shared repository lock and runs `git pull --ff-only` in the configured test repository. A pull failure marks the job as failed; the lock remains held until the test process exits so another worker cannot change the checkout mid-run.
+  * `Worker.js` no longer pulls or locks the test checkout itself — it spawns the test process immediately against whatever code is currently on disk in `TEST_REPO_ROOT`. Multiple workers therefore run fully in parallel with no shared lock. Keeping the checkout up to date is the separate [`update-test-repo.mjs`](./update-test-repo.mjs) daemon described under "Test repo auto-updater".
   * `Worker.js` passes the job id through `JOB_ID`; aliveDaily also forwards `--job-id <jobId>` to `scripts/run-domain-test.mjs`.
   * `Worker.js` validates the command and spawns either the aliveDaily Node runner or the checkAccess npm script in the sibling `TS_PW_FBC` workspace.
   * When execution finishes, `Worker.js` posts results (`DONE` or `FAILED`) back to the server via `POST /api/jobs/complete`.
@@ -129,6 +132,27 @@ Copy-Item worker.env.example worker.env   # on the worker machine
 | `CENTER_RUNNER_INTERVAL_MS` | `5000` | Polling interval in ms |
 | `CENTER_RUNNER_STATE_FILE` | `jobs/worker-state.json` | Last-run job state file |
 | `CENTER_RUNNER_RESULT_FILE` | `jobs/latest-result.json` | Latest result file |
+| `WORKER_COUNT` | *(required by `start-workers.bat`)* | How many worker processes the batch file launches. Not read by `worker.mjs` itself. |
+
+### Test repo auto-updater (`npm run update-test-repo`)
+
+`Worker.js` never pulls or locks the test checkout — running jobs never wait on
+git. Instead, a separate daemon (`update-test-repo.mjs` /
+[`RepoUpdater.js`](./src/updater/RepoUpdater.js)) polls on an interval and runs
+`git pull --ff-only` in `TEST_REPO_ROOT` **only when `jobs/running/` is empty**,
+so the checkout never changes underneath an in-flight Playwright run. If jobs
+are running when it polls, it skips that cycle and checks again later.
+`start-workers.bat` launches this daemon automatically (STEP 5, before the
+workers). To run it standalone:
+
+```powershell
+npm run update-test-repo
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `CENTER_RUNNER_UPDATE_POLL_MS` | `30000` | How often (ms) the updater checks for an idle window to pull |
+| `CENTER_RUNNER_TEST_REPO` / `TEST_REPO_ROOT` | `../TS_PW_FBC` | Same test repo path used by the worker |
 
 ### Adding a new config variable
 
@@ -281,7 +305,16 @@ Copy-Item server.env.example server.env
 Copy-Item worker.env.example worker.env
 ```
 
-Increase `WORKER_COUNT` in `worker.env` to run more queued jobs in parallel.
+`start-workers.bat` requires `WORKER_COUNT` to be set in the worker env file
+(default `D:\workspace\env\worker.env`, configurable via `WORKER_ENV_FILE` at
+the top of the script) — it now exits with an error instead of silently
+defaulting if the key is missing. Increase `WORKER_COUNT` to run more queued
+jobs in parallel; since `Worker.js` no longer locks the test checkout per job,
+all launched workers run jobs fully in parallel (see "Test repo auto-updater"
+above for how the checkout still stays up to date).
+
+`start-workers.bat` also launches the test-repo auto-updater daemon
+(`update-test-repo.mjs`) in its own window alongside the workers.
 
 ## Reports
 

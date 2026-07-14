@@ -9,10 +9,11 @@ Center Runner is a standalone HTTP queue + worker daemon that runs Playwright to
 ## Commands
 
 ```powershell
-npm run start            # start the HTTP server (server.mjs) — default 0.0.0.0:4317
-npm run worker           # start a worker daemon that long-polls the server forever
-npm run worker:once      # process at most one job, then exit (exit 0 = processed, 2 = nothing)
-npm run worker:dry-run   # print the command that would run, spawn nothing (--once --dry-run)
+npm run start              # start the HTTP server (server.mjs) — default 0.0.0.0:4317
+npm run worker             # start a worker daemon that long-polls the server forever
+npm run worker:once        # process at most one job, then exit (exit 0 = processed, 2 = nothing)
+npm run worker:dry-run     # print the command that would run, spawn nothing (--once --dry-run)
+npm run update-test-repo   # start the test-repo auto-updater daemon (update-test-repo.mjs)
 
 # point a worker at a specific server (pass args after --):
 npm.cmd run worker -- --source http://localhost:4317/api/jobs/next
@@ -25,8 +26,8 @@ The npm scripts use repo-local `server.env` / `worker.env` for manual developmen
 Two entrypoints, one shared file-based queue. There is **no database and no message broker** — job state lives entirely as JSON files under `jobs/` (gitignored). Coordination between server and worker is HTTP long-polling.
 
 - `server.mjs` → `src/server/Server.js`: raw `node:http` router (no framework). Serves `public/` static UI, proxies Playwright reports under `/reports/*` from the test repo's `test-results/`, and exposes the `/api/*` job endpoints.
-- `worker.mjs` → `src/worker/Worker.js`: polling loop. Long-polls `GET /api/jobs/next`, prepares the test checkout, spawns the tool-specific child process, then posts completion and report data.
-- Before each real job, `Worker` serializes access to the configured test checkout with a lock under `jobs/`, runs `git pull --ff-only`, and holds the lock until the test child exits. Pull failures fail the job without running stale code; stale locks from dead local worker PIDs are removed automatically.
+- `worker.mjs` → `src/worker/Worker.js`: polling loop. Long-polls `GET /api/jobs/next`, spawns the tool-specific child process against the current `TEST_REPO_ROOT` checkout, then posts completion and report data.
+- `update-test-repo.mjs` → `src/updater/RepoUpdater.js`: a separate, optional daemon (not run by `Worker.js`). It polls on an interval and runs `git pull --ff-only` in `TEST_REPO_ROOT` only when `jobs/running/` is empty, so the checkout never mutates under an in-flight test. `Worker.js` itself no longer pulls or locks the checkout — this was changed deliberately so multiple workers can run jobs fully in parallel instead of serializing on a shared per-checkout lock. `start-workers.bat` launches this daemon automatically alongside the workers.
 
 ### The job lifecycle (file-queue state machine)
 
@@ -83,3 +84,5 @@ Adding a config value requires 4 edits (see README "Adding a new config variable
 ## Deployment
 
 Two batch files at the project root (`start-server.bat`, `start-workers.bat`) handle setup and launch on cmd.exe. Server binds `0.0.0.0` for LAN/Tailscale access. See README for LAN/Tailscale setup.
+
+`start-workers.bat` requires `WORKER_COUNT` to be present in the worker env file it loads (`WORKER_ENV_FILE`, e.g. `D:\workspace\env\worker.env`) — it now exits with `[ERROR]` instead of silently defaulting if the key is missing. The worker-index loop variable (`I`) is unrelated to the total worker count; only `WORKER_COUNT` controls how many `cmd` windows get launched. The batch file also starts `update-test-repo.mjs` in its own window before launching workers.
