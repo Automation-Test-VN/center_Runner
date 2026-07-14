@@ -95,7 +95,7 @@ echo STEP 5: STARTING WORKERS
 echo ============================================================
 pushd "%CENTER_RUNNER_ROOT%"
 set /a "W_COUNT=%WORKER_COUNT%"
-set "I=1"
+set "I=2"
 
 :LOOP_WORKERS
 if %I% GTR %W_COUNT% goto LOOP_END
