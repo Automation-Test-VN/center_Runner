@@ -71,7 +71,7 @@ The server creates ids with `createJobIdForTool(tool, { brand, date })`. Queue f
 * **Files involved**: [Server.js](./src/server/Server.js) (`GET /api/jobs/next`), [WorkerRegistry.js](./src/server/WorkerRegistry.js), [Worker.js](./src/worker/Worker.js), [JobManager.js](./src/server/JobManager.js) (`claimNextJob()`)
 * **Flow**:
   * The worker calls `JobFetcher.fetchJob()` pointing to `/api/jobs/next`.
-  * If a job is queued, `JobManager.claimNextJob()` moves the JSON file from `jobs/queue/` to `jobs/running/`, sets its status to `RUNNING`, and returns the job to the worker.
+  * If a job is queued, `JobManager.claimNextJob()` picks the queued job with the **oldest `createdAt`** (first-come-first-served across all tools, not alphabetical by filename), moves its JSON file from `jobs/queue/` to `jobs/running/`, sets its status to `RUNNING`, and returns the job to the worker.
   * If the queue is empty, `WorkerRegistry` holds the request connection open (long-polling) with a timeout of 60 seconds until a new job is added.
 
 ### 4. Task Running

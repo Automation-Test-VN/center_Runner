@@ -41,6 +41,7 @@ POST /api/jobs/complete → jobs/results/<id>.json (DONE|FAILED), queue+running 
 
 Key mechanics to preserve:
 - **Claiming is `fs.rename`** (`JobManager.claimNextJob`). The rename is the concurrency lock: whichever worker's rename succeeds owns the job; `ENOENT`/`EEXIST`/`EPERM` mean another worker won the race, so it tries the next file. Never replace this with read-then-write.
+- **Queue order is FCFS by `createdAt`, not filename**: `claimNextJob` reads each queued file's `createdAt` (`JobManager.sortQueuedFilesByCreatedAt`) and sorts ascending before claiming, so job ids from different tools (`AL-*` vs `CA-*`) interleave by actual creation time instead of by alphabetical prefix.
 - **All writes are write-temp-then-rename** (`JobManager.writeJsonFile`) to avoid torn reads. Keep this pattern for any new job-file writes.
 - **Long-polling**: if the queue is empty, `WorkerRegistry` holds the HTTP response open (default 60s, `CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS`) and replies `204` on timeout. `POST /api/jobs` calls `workerRegistry.notifyAll()` to immediately hand the new job to a waiting worker.
 - **Duplicate guard**: `addJob` rejects (HTTP 409) a job whose `{tool,group,brand,tag}` command matches an already active (queued/running) job.
