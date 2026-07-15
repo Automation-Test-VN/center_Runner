@@ -31,7 +31,19 @@ const config = {
 
   startWorkersBatPath: path.join(rootDir, 'start-workers.bat'),
 
-  workerWaitTimeoutMs: Number(process.env.CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS || 60000)
+  workerWaitTimeoutMs: Number(process.env.CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS || 60000),
+
+  // A QUEUED job that waits longer than this is marked EXPIRED by the maintenance sweep (for example
+  // a checkAccess ISP with no matching worker online). Default 10 minutes.
+  queueTtlMs: Number(process.env.CENTER_RUNNER_QUEUE_TTL_MS || 600000),
+  // How often the maintenance sweep runs (expire stale queued jobs + prune dead workers). Keep this
+  // finer than queueTtlMs so expiry latency stays small.
+  maintenanceIntervalMs: Number(process.env.CENTER_RUNNER_MAINTENANCE_INTERVAL_MS || 60000),
+  // A worker counts as online if it polled within this window. Must exceed the long-poll hold time
+  // so a healthy worker mid-poll is not flagged offline. Default ~2x the 60s poll cycle.
+  workerOnlineWindowMs: Number(process.env.CENTER_RUNNER_WORKER_ONLINE_WINDOW_MS || 130000),
+  // Drop a worker from the roster entirely after it has been silent this long. Default 1 day.
+  workerRetentionMs: Number(process.env.CENTER_RUNNER_WORKER_RETENTION_MS || 86400000)
 };
 
 export default config;

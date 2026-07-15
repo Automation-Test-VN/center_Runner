@@ -31,7 +31,7 @@ Two entrypoints, one shared file-based queue. There is **no database and no mess
 
 ### The job lifecycle (file-queue state machine)
 
-A job is a JSON file named `<jobId>.json` that physically moves between directories as its status changes. Job id patterns are centralized in `src/common/JobId.js`: aliveDaily uses `AL-YYYYMMDD-HHMMSS-brand-XX`, and checkAccess uses `CA-YYYYMMDD-HHMMSS-XX`.
+A job is a JSON file named `<jobId>.json` that physically moves between directories as its status changes. Job id patterns are centralized in `src/common/JobId.js`: aliveDaily uses `AL-YYYYMMDD-HHMMSS-brand-XX`, and checkAccess uses `CA-YYYYMMDD-HHMMSS-XX-ISP`. A checkAccess Start fans out to **one job per selected ISP (nhà mạng)**, all sharing one base id (`CA-YYYYMMDD-HHMMSS-XX`) with a different ISP suffix; the ISP is chosen at creation time and is part of the queue/report id (the worker no longer appends it).
 
 ```
 POST /api/jobs      → jobs/queue/<id>.json      (status QUEUED)
@@ -44,15 +44,18 @@ Key mechanics to preserve:
 - **Queue order is FCFS by `createdAt`, not filename**: `claimNextJob` reads each queued file's `createdAt` (`JobManager.sortQueuedFilesByCreatedAt`) and sorts ascending before claiming, so job ids from different tools (`AL-*` vs `CA-*`) interleave by actual creation time instead of by alphabetical prefix.
 - **All writes are write-temp-then-rename** (`JobManager.writeJsonFile`) to avoid torn reads. Keep this pattern for any new job-file writes.
 - **Long-polling**: if the queue is empty, `WorkerRegistry` holds the HTTP response open (default 60s, `CENTER_RUNNER_WORKER_WAIT_TIMEOUT_MS`) and replies `204` on timeout. `POST /api/jobs` calls `workerRegistry.notifyAll()` to immediately hand the new job to a waiting worker.
-- **Duplicate guard**: `addJob` rejects (HTTP 409) a job whose `{tool,group,brand,tag}` command matches an already active (queued/running) job.
+- **Duplicate guard**: `addJob` rejects (HTTP 409) a job whose command matches an already active (queued/running) job — `{tool,group,brand,tag}` for aliveDaily, `{tool,tag,isp}` for checkAccess (so different ISPs of one Start are not treated as duplicates).
+- **ISP routing**: `claimNextJob(workerIp, workerName, workerIsp)` filters candidates via `workerCanRun` — aliveDaily jobs (no ISP) may be claimed by any worker, but a checkAccess job is bound to its ISP and only a worker whose `WORKER_ISP` matches can claim it. A worker with no ISP set can only run aliveDaily. `WorkerRegistry.notifyAll` applies each waiter's own ISP filter and leaves non-matching waiters waiting instead of ending the loop.
+- **Queue TTL / EXPIRED**: a periodic maintenance sweep (`Server.startMaintenanceLoop`, `config.maintenanceIntervalMs`) marks any QUEUED job older than `config.queueTtlMs` as `EXPIRED` (`JobManager.expireStaleQueuedJobs`) — e.g. a checkAccess ISP with no matching worker online — using the same atomic `fs.rename` claim so it never races a worker. The sweep also prunes long-dead workers from the presence roster.
+- **Worker presence**: `WorkerPresence` records each worker reactively on every `/api/jobs/next` poll (the poll is the heartbeat — no separate timer). `GET /api/workers` returns `{name,ip,isp,online,lastSeen}` (online = polled within `config.workerOnlineWindowMs` **or** currently running a job); `GET /api/isps` returns the distinct online ISPs that drive the checkAccess ISP checkboxes. Status is computed on read, so the panel stays fresh independent of the sweep.
 - **Worker idempotency**: each worker records the last job identity in a per-worker `jobs/worker-state-<name>.json` and skips re-processing the same identity.
 - **Job id registry**: create ids with `createJobIdForTool(tool, { brand, date })`; validate queue/result ids with `isValidJobId()` / `isValidJobFileName()`. When adding a new tool, add its pattern, format label, and generator to `JOB_ID_CONFIG_BY_TOOL` before changing queue, route, or report behavior.
 
 ### The validation contract
 
-AliveDaily uses `{ tool, group, brand, tag }`; checkAccess uses `{ tool, tag }`. Command rules are validated in both server creation and the live worker path. Keep duplicated helper validation aligned when these contracts change.
+AliveDaily uses `{ tool, group, brand, tag }`; checkAccess uses `{ tool, tag, isp }`. Command rules are validated in both server creation and the live worker path. Keep duplicated helper validation aligned when these contracts change.
 
-The job-id and report contract is shared with `../TS_PW_FBC`. AliveDaily forwards `--job-id` and `JOB_ID`; checkAccess uses `JOB_ID` with `REPORT_SCOPE=checkAccess`. Update validation, report routing, docs, skills, and references on both sides when this contract changes.
+The job-id and report contract is shared with `../TS_PW_FBC`. AliveDaily forwards `--job-id` and `JOB_ID`; checkAccess uses `JOB_ID` with `REPORT_SCOPE=checkAccess`. The `JOB_ID` handed to Playwright is the full checkAccess id **including its ISP suffix**; `../TS_PW_FBC` treats `JOB_ID` as an opaque token (path-safe only), so a change to the id format needs no change there. Update validation, report routing, docs, skills, and references when this contract changes.
 
 The worker builds one of these fixed command families and never executes arbitrary browser input (`Worker.buildRunner`):
 ```

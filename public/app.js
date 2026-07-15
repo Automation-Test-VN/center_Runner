@@ -9,17 +9,27 @@ class RunnerForm {
     this.groupInput = this.form.querySelector('#group-name');
     this.brandInput = this.form.querySelector('#brand-name');
     this.startButton = this.form.querySelector('.start-button');
-    
+
+    this.ispField = document.getElementById('isp-field');
+    this.ispOptions = document.getElementById('isp-options');
+    this.ispEmpty = document.getElementById('isp-empty');
+
     this.brandGroups = [];
     this.onSubmit = onSubmit;
+    this.onToolChange = null;
 
     this.initEvents();
   }
 
   initEvents() {
     this.groupInput.addEventListener('change', () => this.syncBrandOptions());
-    this.toolInput.addEventListener('change', () => this.syncToolFields());
-    
+    this.toolInput.addEventListener('change', () => {
+      this.syncToolFields();
+      if (this.onToolChange) {
+        this.onToolChange(this.toolInput.value);
+      }
+    });
+
     this.form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (this.onSubmit) {
@@ -32,13 +42,46 @@ class RunnerForm {
     const isCheckAccess = this.toolInput.value === 'checkAccess';
     this.groupInput.disabled = isCheckAccess;
     this.brandInput.disabled = isCheckAccess;
+    this.ispField.hidden = !isCheckAccess;
+  }
+
+  isCheckAccess() {
+    return this.toolInput.value === 'checkAccess';
+  }
+
+  // Render ISP checkboxes from the online-worker ISP list, preserving current selections.
+  setIspOptions(isps) {
+    const previous = new Set(this.getSelectedIsps());
+    this.ispOptions.innerHTML = '';
+
+    for (const isp of isps) {
+      const label = document.createElement('label');
+      label.className = 'isp-option';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = isp;
+      checkbox.checked = previous.size === 0 ? true : previous.has(isp);
+
+      const text = document.createElement('span');
+      text.textContent = isp;
+
+      label.append(checkbox, text);
+      this.ispOptions.append(label);
+    }
+
+    this.ispEmpty.hidden = isps.length > 0;
+  }
+
+  getSelectedIsps() {
+    return [...this.ispOptions.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   }
 
   getValues() {
     const tool = this.toolInput.value;
 
     if (tool === 'checkAccess') {
-      return { tool, tag: '@checkAccess' };
+      return { tool, isps: this.getSelectedIsps() };
     }
 
     return {
@@ -164,7 +207,7 @@ class JobTable {
       row.append(
         this.tableCell(job.reportJobId || job.jobId || '-'),
         this.tableCell(job.command?.group || '-'),
-        this.tableCell(job.command?.brand || '-'),
+        this.tableCell(job.command?.brand || job.command?.isp || '-'),
         this.statusCell(job.status || '-'),
         this.tableCell(Number.isInteger(job.exitCode) ? String(job.exitCode) : '-'),
         this.tableCell(this.formatTime(job.createdAt || job.startedAt || job.finishedAt)),
@@ -314,6 +357,52 @@ class ReportViewer {
   }
 }
 
+class WorkerPanel {
+  constructor(listSelector) {
+    this.list = document.querySelector(listSelector);
+  }
+
+  render(workers) {
+    this.list.innerHTML = '';
+
+    if (!workers.length) {
+      const empty = document.createElement('li');
+      empty.className = 'worker-empty';
+      empty.textContent = 'Chưa có worker nào.';
+      this.list.append(empty);
+      return;
+    }
+
+    for (const worker of workers) {
+      const item = document.createElement('li');
+      item.className = `worker-item ${worker.online ? 'is-online' : 'is-offline'}`;
+
+      const dot = document.createElement('span');
+      dot.className = 'worker-dot';
+
+      const info = document.createElement('span');
+      info.className = 'worker-info';
+
+      const name = document.createElement('span');
+      name.className = 'worker-name';
+      name.textContent = worker.name;
+
+      const isp = document.createElement('span');
+      isp.className = 'worker-isp';
+      isp.textContent = worker.isp || 'no ISP';
+
+      info.append(name, isp);
+      item.append(info, dot);
+      this.list.append(item);
+    }
+  }
+
+  // Distinct ISPs of workers that are currently online — drives the checkAccess ISP checkboxes.
+  onlineIsps(workers) {
+    return [...new Set(workers.filter((worker) => worker.online && worker.isp).map((worker) => worker.isp))].sort();
+  }
+}
+
 class AppController {
   constructor() {
     this.form = new RunnerForm('#runner-form', (values) => this.startJob(values));
@@ -327,7 +416,9 @@ class AppController {
       aliveNoteId: 'alive-note'
     });
     this.reportViewer = new ReportViewer('#report-frame');
+    this.workerPanel = new WorkerPanel('#worker-list');
     this.jobPollTimer = null;
+    this.workerPollTimer = null;
   }
 
   async initialize() {
@@ -335,9 +426,35 @@ class AppController {
       this.summary.update({ group, brand });
     });
 
+    // Refresh the ISP checkboxes immediately when the user switches to Check Access.
+    this.form.onToolChange = (tool) => {
+      if (tool === 'checkAccess') {
+        this.loadWorkers();
+      }
+    };
+
     await this.loadBrandGroups();
     await this.loadJobs();
+    await this.loadWorkers();
     this.startJobPolling();
+    this.startWorkerPolling();
+  }
+
+  // One poll of /api/workers both renders the status panel and refreshes the online-ISP checkboxes.
+  async loadWorkers() {
+    try {
+      const response = await fetch('/api/workers');
+      if (!response.ok) {
+        throw new Error(`Request failed with HTTP ${response.status}.`);
+      }
+
+      const data = await response.json();
+      const workers = Array.isArray(data.workers) ? data.workers : [];
+      this.workerPanel.render(workers);
+      this.form.setIspOptions(this.workerPanel.onlineIsps(workers));
+    } catch (error) {
+      this.summary.setAliveNote(`Workers Error: ${error.message}`);
+    }
   }
 
   async loadBrandGroups() {
@@ -442,17 +559,21 @@ class AppController {
     this.summary.setAliveNote('');
 
     try {
-      const job = await this.postJson('/api/jobs', values);
+      const data = await this.postJson('/api/jobs', values);
+      const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      const first = jobs[0];
 
-      this.summary.update({
-        jobId: job.jobId,
-        group: job.command.group || '-',
-        brand: job.command.brand || '-',
-        status: job.status,
-        note: job.command.tool === 'checkAccess'
-          ? 'Queued Check Access'
-          : `Queued ${job.command.group}/${job.command.brand}`
-      });
+      if (first) {
+        this.summary.update({
+          jobId: first.jobId,
+          group: first.command.group || '-',
+          brand: first.command.brand || first.command.isp || '-',
+          status: first.status,
+          note: first.command.tool === 'checkAccess'
+            ? `Queued Check Access: ${jobs.map((job) => job.command.isp).join(', ')}`
+            : `Queued ${first.command.group}/${first.command.brand}`
+        });
+      }
 
       await this.loadJobs();
     } catch (error) {
@@ -489,6 +610,18 @@ class AppController {
     if (this.jobPollTimer) {
       window.clearInterval(this.jobPollTimer);
       this.jobPollTimer = null;
+    }
+  }
+
+  startWorkerPolling() {
+    this.stopWorkerPolling();
+    this.workerPollTimer = window.setInterval(() => this.loadWorkers(), 60000);
+  }
+
+  stopWorkerPolling() {
+    if (this.workerPollTimer) {
+      window.clearInterval(this.workerPollTimer);
+      this.workerPollTimer = null;
     }
   }
 }

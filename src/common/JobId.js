@@ -2,10 +2,13 @@ export const ALIVE_DAILY_TOOL = 'aliveDaily';
 export const CHECK_ACCESS_TOOL = 'checkAccess';
 export const ALIVE_DAILY_JOB_ID_PATTERN = /^AL-\d{8}-\d{6}-[a-z0-9-]+-[A-Z0-9]{2}$/;
 export const ALIVE_DAILY_JOB_ID_FORMAT = 'AL-YYYYMMDD-HHMMSS-brand-XX';
-export const CHECK_ACCESS_JOB_ID_PATTERN = /^CA-\d{8}-\d{6}-[A-Z0-9]{2}$/;
-export const CHECK_ACCESS_JOB_ID_FORMAT = 'CA-YYYYMMDD-HHMMSS-XX';
-// checkAccess report ids append the reporting worker's ISP (WORKER_ISP), known only once a
-// worker claims the job — so this is derived at run time, never used as the queue/result file id.
+// checkAccess queue ids now carry the target worker ISP as a suffix, chosen when the job is
+// created (one job per selected ISP). The base id (without ISP) is shared across the ISPs picked
+// in the same Start so they group together; the full queue/report id includes the ISP.
+export const CHECK_ACCESS_JOB_ID_BASE_PATTERN = /^CA-\d{8}-\d{6}-[A-Z0-9]{2}$/;
+export const CHECK_ACCESS_JOB_ID_PATTERN = /^CA-\d{8}-\d{6}-[A-Z0-9]{2}(-[A-Z0-9]+)?$/;
+export const CHECK_ACCESS_JOB_ID_FORMAT = 'CA-YYYYMMDD-HHMMSS-XX-ISP';
+// A checkAccess id that includes the ISP suffix (used for report path/URL derivation).
 export const CHECK_ACCESS_REPORT_JOB_ID_PATTERN = /^CA-\d{8}-\d{6}-[A-Z0-9]{2}-[A-Z0-9]+$/;
 
 export const JOB_RESULT_PATH_PATTERN = /^\/api\/jobs\/([^/]+)\/result$/;
@@ -24,9 +27,9 @@ const JOB_ID_CONFIG_BY_TOOL = new Map([
   [CHECK_ACCESS_TOOL, {
     pattern: CHECK_ACCESS_JOB_ID_PATTERN,
     format: CHECK_ACCESS_JOB_ID_FORMAT,
-    create({ date = new Date() }) {
-      const suffix = Math.random().toString(36).slice(2, 4).toUpperCase();
-      return `CA-${formatJobStamp(date)}-${suffix}`;
+    create({ isp, date = new Date() } = {}) {
+      const base = createCheckAccessBaseId(date);
+      return isp ? appendIspTag(base, isp) : base;
     }
   }]
 ]);
@@ -51,16 +54,21 @@ export function normalizeIspTag(isp) {
   return String(isp || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-// Only checkAccess ids get an ISP suffix, and only once a worker (which knows its own
-// WORKER_ISP) has claimed the job. jobId must already be a valid checkAccess id.
-export function buildCheckAccessReportJobId(jobId, isp) {
+// The base checkAccess id (without ISP). Generate this once per Start and append each selected
+// ISP with appendIspTag, so all ISP jobs of one Start share the same base id.
+export function createCheckAccessBaseId(date = new Date()) {
+  const suffix = Math.random().toString(36).slice(2, 4).toUpperCase();
+  return `CA-${formatJobStamp(date)}-${suffix}`;
+}
+
+export function appendIspTag(baseId, isp) {
   const ispTag = normalizeIspTag(isp);
 
-  if (!ispTag || !isValidJobIdForTool(CHECK_ACCESS_TOOL, jobId)) {
-    return jobId;
+  if (!ispTag) {
+    throw new Error('A checkAccess job id requires a non-empty ISP tag.');
   }
 
-  return `${jobId}-${ispTag}`;
+  return `${baseId}-${ispTag}`;
 }
 
 // Accepts either a canonical job id or a checkAccess id with an ISP suffix appended,

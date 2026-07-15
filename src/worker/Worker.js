@@ -3,8 +3,6 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { buildCheckAccessReportJobId } from '../common/JobId.js';
-
 const SUPPORTED_TOOLS = new Set(['aliveDaily', 'checkAccess']);
 
 class Worker {
@@ -349,7 +347,12 @@ class Worker {
       tag: String(command?.tag || (tool === 'checkAccess' ? '@checkAccess' : '@smoke')).trim()
     };
 
-    if (tool !== 'checkAccess') {
+    if (tool === 'checkAccess') {
+      const isp = String(command?.isp || '').trim();
+      if (isp) {
+        normalized.isp = isp;
+      }
+    } else {
       normalized.group = String(command?.group || '').trim().toLowerCase();
       normalized.brand = String(command?.brand || '').trim().toLowerCase();
     }
@@ -393,11 +396,9 @@ class Worker {
   }
 
   resolveReportJobId(command, jobId) {
-    if (command.tool !== 'checkAccess') {
-      return jobId;
-    }
-
-    return buildCheckAccessReportJobId(jobId, this.config.workerIsp);
+    // The checkAccess ISP suffix is now baked into the job id by the server at creation time, so the
+    // job id already is the report id — never append the worker ISP again here.
+    return jobId;
   }
 
   resolveReportHtmlPath(command, jobId) {
@@ -458,6 +459,10 @@ class Worker {
 
     if (!url.searchParams.has('workerName')) {
       url.searchParams.set('workerName', this.config.workerName);
+    }
+
+    if (this.config.workerIsp && !url.searchParams.has('isp')) {
+      url.searchParams.set('isp', this.config.workerIsp);
     }
 
     return url.toString();

@@ -1,67 +1,117 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import config from '../common/Config.js';
-import { ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL, createJobIdForTool, formatJobStamp, isValidJobFileName, isValidJobId, isValidReportJobId, resolveReportNamespace, resolveReportUrl } from '../common/JobId.js';
+import { ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL, appendIspTag, createCheckAccessBaseId, createJobIdForTool, formatJobStamp, isValidJobFileName, isValidJobId, isValidReportJobId, normalizeIspTag, resolveReportNamespace, resolveReportUrl } from '../common/JobId.js';
 
 class JobManager {
   async addJob(payload) {
     await this.ensureJobDirs();
 
-    const job = this.buildJob(payload);
-    const duplicateJob = await this.findActiveDuplicateJob(job.command);
+    // One Start may create several jobs: aliveDaily -> 1 job; checkAccess -> one job per selected
+    // ISP (all sharing a base id). Reject the whole batch if any of the jobs duplicates an active one.
+    const jobs = this.buildJobs(payload);
 
-    if (duplicateJob) {
-      const commandName = job.command.tool === CHECK_ACCESS_TOOL
-        ? 'Check Access'
-        : `${job.command.group}/${job.command.brand}`;
-      throw new Error(`${commandName} is already ${duplicateJob.status}.`);
+    for (const job of jobs) {
+      const duplicateJob = await this.findActiveDuplicateJob(job.command);
+
+      if (duplicateJob) {
+        throw new Error(`${this.describeCommand(job.command)} is already ${duplicateJob.status}.`);
+      }
     }
 
-    await this.writeJsonFile(this.queueJobPath(job), job);
-    await this.writeJsonFile(config.latestCommandFile, job.command);
-    await this.writeJsonFile(config.latestJobFile, job);
-    await this.writeJobStatus(job);
+    for (const job of jobs) {
+      await this.writeJsonFile(this.queueJobPath(job), job);
+      await this.writeJobStatus(job);
+    }
 
-    return job;
+    const latest = jobs[jobs.length - 1];
+    await this.writeJsonFile(config.latestCommandFile, latest.command);
+    await this.writeJsonFile(config.latestJobFile, latest);
+
+    return jobs;
   }
 
-  buildJob(payload) {
+  buildJobs(payload) {
     const tool = String(payload.tool || '').trim();
-    const group = String(payload.group || '').trim().toLowerCase();
-    const brand = String(payload.brand || '').trim().toLowerCase();
-    const tag = tool === CHECK_ACCESS_TOOL ? '@checkAccess' : '@smoke';
 
     if (![ALIVE_DAILY_TOOL, CHECK_ACCESS_TOOL].includes(tool)) {
       throw new Error('Unsupported tool.');
     }
 
-    if (tool === ALIVE_DAILY_TOOL && !/^fbc\d+$/.test(group)) {
+    const now = new Date();
+
+    if (tool === CHECK_ACCESS_TOOL) {
+      return this.buildCheckAccessJobs(payload, now);
+    }
+
+    return [this.buildAliveDailyJob(payload, now)];
+  }
+
+  buildCheckAccessJobs(payload, now) {
+    const isps = this.normalizeIspList(payload.isps ?? payload.isp);
+
+    if (isps.length === 0) {
+      throw new Error('Select at least one ISP (nhà mạng) for Check Access.');
+    }
+
+    const baseId = createCheckAccessBaseId(now);
+
+    return isps.map((isp) => ({
+      jobId: appendIspTag(baseId, isp),
+      createdAt: now.toISOString(),
+      status: 'QUEUED',
+      command: { tool: CHECK_ACCESS_TOOL, tag: '@checkAccess', isp }
+    }));
+  }
+
+  buildAliveDailyJob(payload, now) {
+    const group = String(payload.group || '').trim().toLowerCase();
+    const brand = String(payload.brand || '').trim().toLowerCase();
+
+    if (!/^fbc\d+$/.test(group)) {
       throw new Error('Group must use the fbc number format, for example fbc1.');
     }
 
-    if (tool === ALIVE_DAILY_TOOL && !/^[a-z0-9-]+$/.test(brand)) {
+    if (!/^[a-z0-9-]+$/.test(brand)) {
       throw new Error('Brand must contain only lowercase letters, numbers, and hyphens.');
     }
 
-    if (!/^@[A-Za-z0-9_-]+$/.test(tag)) {
-      throw new Error('Tag must start with @ and contain only letters, numbers, underscore, or hyphen.');
-    }
-
-    const now = new Date();
-    const jobId = createJobIdForTool(tool, { brand, date: now });
-    const command = tool === CHECK_ACCESS_TOOL
-      ? { tool, tag }
-      : { tool, group, brand, tag };
-
     return {
-      jobId,
+      jobId: createJobIdForTool(ALIVE_DAILY_TOOL, { brand, date: now }),
       createdAt: now.toISOString(),
       status: 'QUEUED',
-      command
+      command: { tool: ALIVE_DAILY_TOOL, group, brand, tag: '@smoke' }
     };
   }
 
-  async claimNextJob(workerIp, workerName) {
+  normalizeIspList(raw) {
+    const values = Array.isArray(raw) ? raw : (raw != null ? [raw] : []);
+    const seen = new Set();
+    const isps = [];
+
+    for (const value of values) {
+      const isp = normalizeIspTag(value);
+
+      if (!isp || seen.has(isp)) {
+        continue;
+      }
+
+      seen.add(isp);
+      isps.push(isp);
+    }
+
+    return isps;
+  }
+
+  describeCommand(command) {
+    if (command.tool === CHECK_ACCESS_TOOL) {
+      return `Check Access (${normalizeIspTag(command.isp) || '?'})`;
+    }
+
+    return `${command.group}/${command.brand}`;
+  }
+
+  async claimNextJob(workerIp, workerName, workerIsp = '') {
     await this.ensureJobDirs();
 
     const entries = await fs.readdir(config.queuedJobsDir, { withFileTypes: true }).catch(() => []);
@@ -76,7 +126,12 @@ class JobManager {
 
     const queuedFiles = await this.sortQueuedFilesByCreatedAt(fileNames);
 
-    for (const fileName of queuedFiles) {
+    for (const { fileName, command } of queuedFiles) {
+      // ISP routing: aliveDaily runs on any worker; checkAccess only on the worker whose ISP matches.
+      if (!this.workerCanRun(command, workerIsp)) {
+        continue;
+      }
+
       const queuedPath = path.join(config.queuedJobsDir, fileName);
       const runningPath = path.join(config.runningJobsDir, fileName);
 
@@ -112,23 +167,36 @@ class JobManager {
     return null;
   }
 
+  // aliveDaily (no ISP) may be claimed by any worker; a checkAccess job is bound to its ISP and can
+  // only be claimed by a worker configured with the same WORKER_ISP. A worker with no ISP set can
+  // therefore only run aliveDaily.
+  workerCanRun(command, workerIsp) {
+    if (command?.tool !== CHECK_ACCESS_TOOL) {
+      return true;
+    }
+
+    const own = normalizeIspTag(workerIsp);
+    return own !== '' && own === normalizeIspTag(command?.isp);
+  }
+
   async sortQueuedFilesByCreatedAt(fileNames) {
-    const withCreatedAt = await Promise.all(fileNames.map(async (fileName) => {
+    const withMeta = await Promise.all(fileNames.map(async (fileName) => {
       let createdAtMs = 0;
+      let command = null;
 
       try {
-        const raw = await fs.readFile(path.join(config.queuedJobsDir, fileName), 'utf8');
-        createdAtMs = Date.parse(JSON.parse(raw)?.createdAt || '') || 0;
+        const parsed = JSON.parse(await fs.readFile(path.join(config.queuedJobsDir, fileName), 'utf8'));
+        createdAtMs = Date.parse(parsed?.createdAt || '') || 0;
+        command = parsed?.command || null;
       } catch {
         createdAtMs = 0;
       }
 
-      return { fileName, createdAtMs };
+      return { fileName, createdAtMs, command };
     }));
 
-    return withCreatedAt
-      .sort((a, b) => a.createdAtMs - b.createdAtMs || a.fileName.localeCompare(b.fileName))
-      .map((entry) => entry.fileName);
+    return withMeta
+      .sort((a, b) => a.createdAtMs - b.createdAtMs || a.fileName.localeCompare(b.fileName));
   }
 
   async completeJob(payload) {
@@ -335,6 +403,19 @@ class JobManager {
     await this.writeJsonFile(config.latestCommandFile, activeJob.command);
   }
 
+  async listRunningWorkerNames() {
+    const activeJobs = await this.listActiveJobs();
+    const names = new Set();
+
+    for (const job of activeJobs) {
+      if (job.status === 'RUNNING' && job.workerName) {
+        names.add(job.workerName);
+      }
+    }
+
+    return names;
+  }
+
   async findActiveDuplicateJob(command) {
     const activeJobs = await this.listActiveJobs();
     return activeJobs.find((job) => this.commandsEqual(job.command, command)) || null;
@@ -374,8 +455,11 @@ class JobManager {
       return false;
     }
 
-    return left.tool === CHECK_ACCESS_TOOL
-      || (left?.group === right?.group && left?.brand === right?.brand);
+    if (left.tool === CHECK_ACCESS_TOOL) {
+      return normalizeIspTag(left?.isp) === normalizeIspTag(right?.isp);
+    }
+
+    return left?.group === right?.group && left?.brand === right?.brand;
   }
 
   queueJobPath(job) {
@@ -435,6 +519,88 @@ class JobManager {
     }
 
     return { ok: true, deletedCount };
+  }
+
+  // Sweep the queue and terminate jobs that have waited longer than ttlMs (for example a checkAccess
+  // ISP with no matching worker online). Claiming is the same atomic fs.rename used by workers, so a
+  // job a worker grabs at the same instant is never double-handled.
+  async expireStaleQueuedJobs(ttlMs) {
+    await this.ensureJobDirs();
+
+    if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+      return { expiredCount: 0 };
+    }
+
+    const now = Date.now();
+    const entries = await fs.readdir(config.queuedJobsDir, { withFileTypes: true }).catch(() => []);
+    let expiredCount = 0;
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !isValidJobFileName(entry.name)) {
+        continue;
+      }
+
+      const queuedPath = path.join(config.queuedJobsDir, entry.name);
+      const body = await fs.readFile(queuedPath, 'utf8').catch(() => null);
+
+      if (!body) {
+        continue;
+      }
+
+      const job = JSON.parse(body);
+      const createdAtMs = Date.parse(job?.createdAt || '') || 0;
+
+      if (createdAtMs === 0 || now - createdAtMs <= ttlMs) {
+        continue;
+      }
+
+      const runningPath = path.join(config.runningJobsDir, entry.name);
+
+      try {
+        await fs.rename(queuedPath, runningPath);
+      } catch (error) {
+        if (['ENOENT', 'EEXIST', 'EPERM'].includes(error?.code)) {
+          continue;
+        }
+
+        throw error;
+      }
+
+      await this.expireOwnedJob(job, runningPath);
+      expiredCount += 1;
+    }
+
+    if (expiredCount > 0) {
+      await this.syncLatestActiveJob();
+    }
+
+    return { expiredCount };
+  }
+
+  async expireOwnedJob(job, ownedPath) {
+    const jobId = job.jobId;
+
+    const result = {
+      jobId,
+      reportJobId: jobId,
+      status: 'EXPIRED',
+      exitCode: null,
+      command: job.command || null,
+      workerIp: null,
+      workerName: null,
+      testRepoRoot: null,
+      createdAt: job.createdAt || null,
+      startedAt: null,
+      finishedAt: new Date().toISOString(),
+      reportUrl: null
+    };
+
+    await this.writeJsonFile(config.latestResultFile, result);
+    await this.writeJsonFile(path.join(config.jobResultsDir, `${jobId}.json`), result);
+    await this.removeIfExists(ownedPath);
+    await this.removeIfExists(path.join(config.queuedJobsDir, `${jobId}.json`));
+
+    console.log(`[JobManager] Expired queued job ${jobId} after exceeding queue TTL.`);
   }
 
   formatJobStamp(date) {

@@ -6,11 +6,12 @@ class WorkerRegistry {
     this.workerWaitTimeoutMs = config.workerWaitTimeoutMs;
   }
 
-  add(res, jobManager, workerIp, workerName) {
+  add(res, jobManager, workerIp, workerName, workerIsp = '') {
     const waiter = {
       res,
       workerIp,
       workerName,
+      workerIsp,
       createdAt: new Date().toISOString(),
       timeout: null
     };
@@ -32,26 +33,26 @@ class WorkerRegistry {
   }
 
   async notifyAll(jobManager) {
-    while (this.waitingWorkers.length > 0) {
-      const waiter = this.waitingWorkers.shift();
+    // Try to hand a job to each waiter using ITS OWN ISP filter. A waiter with no matching job is
+    // left waiting (its own timeout will 204 it) instead of ending the loop — otherwise one ISP's
+    // idle waiter would starve the others of a fresh job.
+    const waiters = [...this.waitingWorkers];
 
-      if (!waiter) {
+    for (const waiter of waiters) {
+      if (waiter.res.writableEnded) {
+        this.remove(waiter);
+        clearTimeout(waiter.timeout);
+        continue;
+      }
+
+      const job = await jobManager.claimNextJob(waiter.workerIp, waiter.workerName, waiter.workerIsp);
+
+      if (!job) {
         continue;
       }
 
       clearTimeout(waiter.timeout);
-
-      if (waiter.res.writableEnded) {
-        continue;
-      }
-
-      const job = await jobManager.claimNextJob(waiter.workerIp, waiter.workerName);
-
-      if (!job) {
-        this.sendNoContent(waiter.res);
-        break;
-      }
-
+      this.remove(waiter);
       this.sendJson(waiter.res, 200, job);
     }
   }
