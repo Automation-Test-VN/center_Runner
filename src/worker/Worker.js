@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-
 const SUPPORTED_TOOLS = new Set(['aliveDaily', 'checkAccess']);
 
 class Worker {
@@ -37,6 +36,7 @@ class Worker {
   logStartupInfo() {
     console.log(`[CenterWorker] Worker name: ${this.config.workerName}`);
     console.log(`[CenterWorker] Worker IP: ${this.config.workerIp}`);
+    console.log(`[CenterWorker] Worker ISP: ${this.config.workerIsp || '(none)'}`);
     console.log(`[CenterWorker] Test repo: ${this.config.testRepoRoot}`);
     console.log(`[CenterWorker] Source: ${this.config.source}`);
     console.log(`[CenterWorker] State file: ${this.config.stateFile}`);
@@ -82,7 +82,12 @@ class Worker {
       throw error;
     }
 
+    const reportJobId = this.resolveReportJobId(job.command, job.identity);
+
     console.log(`[CenterWorker] Claimed job: ${job.identity}`);
+    if (reportJobId !== job.identity) {
+      console.log(`[CenterWorker] Report job id: ${reportJobId}`);
+    }
     console.log(`[CenterWorker] Running: ${runner.command} ${runner.args.join(' ')}`);
 
     let child = null;
@@ -92,7 +97,7 @@ class Worker {
         cwd: this.config.testRepoRoot,
         env: {
           ...process.env,
-          JOB_ID: job.identity
+          JOB_ID: reportJobId
         },
         shell: false,
         stdio: 'inherit'
@@ -153,6 +158,7 @@ class Worker {
       const jobResult = {
         jobIdentity: job.identity,
         jobId: job.identity,
+        reportJobId,
         workerIp: this.config.workerIp,
         workerName: this.config.workerName,
         testRepoRoot: this.config.testRepoRoot,
@@ -174,7 +180,7 @@ class Worker {
 
     let reportHtml = null;
     try {
-      const reportHtmlPath = this.resolveReportHtmlPath(job.command, job.identity);
+      const reportHtmlPath = this.resolveReportHtmlPath(job.command, reportJobId);
       if (fs.existsSync(reportHtmlPath)) {
         reportHtml = await fsp.readFile(reportHtmlPath, 'utf8');
         console.log(`[CenterWorker] Successfully read report file: ${reportHtmlPath} (${reportHtml.length} bytes)`);
@@ -188,6 +194,7 @@ class Worker {
     const jobResult = {
       jobIdentity: job.identity,
       jobId: job.identity,
+      reportJobId,
       workerIp: this.config.workerIp,
       workerName: this.config.workerName,
       testRepoRoot: this.config.testRepoRoot,
@@ -340,7 +347,12 @@ class Worker {
       tag: String(command?.tag || (tool === 'checkAccess' ? '@checkAccess' : '@smoke')).trim()
     };
 
-    if (tool !== 'checkAccess') {
+    if (tool === 'checkAccess') {
+      const isp = String(command?.isp || '').trim();
+      if (isp) {
+        normalized.isp = isp;
+      }
+    } else {
       normalized.group = String(command?.group || '').trim().toLowerCase();
       normalized.brand = String(command?.brand || '').trim().toLowerCase();
     }
@@ -381,6 +393,12 @@ class Worker {
       command: process.execPath,
       args
     };
+  }
+
+  resolveReportJobId(command, jobId) {
+    // The checkAccess ISP suffix is now baked into the job id by the server at creation time, so the
+    // job id already is the report id — never append the worker ISP again here.
+    return jobId;
   }
 
   resolveReportHtmlPath(command, jobId) {
@@ -441,6 +459,10 @@ class Worker {
 
     if (!url.searchParams.has('workerName')) {
       url.searchParams.set('workerName', this.config.workerName);
+    }
+
+    if (this.config.workerIsp && !url.searchParams.has('isp')) {
+      url.searchParams.set('isp', this.config.workerIsp);
     }
 
     return url.toString();

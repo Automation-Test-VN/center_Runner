@@ -7,12 +7,15 @@ import { JOB_RESULT_PATH_PATTERN, isValidJobId } from '../common/JobId.js';
 import JobManager from './JobManager.js';
 import DomainChecker from './DomainChecker.js';
 import WorkerRegistry from './WorkerRegistry.js';
+import WorkerPresence from './WorkerPresence.js';
 
 class Server {
   constructor() {
     this.jobManager = new JobManager();
     this.domainChecker = new DomainChecker();
     this.workerRegistry = new WorkerRegistry();
+    this.workerPresence = new WorkerPresence();
+    this.maintenanceTimer = null;
     this.server = null;
 
     this.contentTypes = new Map([
@@ -48,7 +51,30 @@ class Server {
       console.log(`Jobs queue dir: ${config.queuedJobsDir}`);
       console.log(`Jobs running dir: ${config.runningJobsDir}`);
       console.log(`Jobs results dir: ${config.jobResultsDir}`);
+      console.log(`Queue TTL: ${config.queueTtlMs}ms, maintenance every ${config.maintenanceIntervalMs}ms`);
     });
+
+    this.startMaintenanceLoop();
+  }
+
+  // One periodic sweep does both cleanup jobs: expire QUEUED jobs past the TTL (e.g. a checkAccess
+  // ISP with no matching worker) and drop long-dead workers from the roster. Worker online/offline
+  // status is NOT computed here — it is derived reactively on each /api/workers read.
+  startMaintenanceLoop() {
+    if (this.maintenanceTimer) {
+      return;
+    }
+
+    this.maintenanceTimer = setInterval(async () => {
+      try {
+        await this.jobManager.expireStaleQueuedJobs(config.queueTtlMs);
+        this.workerPresence.prune();
+      } catch (error) {
+        console.error(`[Server] Maintenance sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }, config.maintenanceIntervalMs);
+
+    this.maintenanceTimer.unref?.();
   }
 
   async handleRequest(req, res) {
@@ -63,11 +89,11 @@ class Server {
       const payload = await this.readJson(req);
 
       try {
-        const job = await this.jobManager.addJob(payload);
+        const jobs = await this.jobManager.addJob(payload);
 
         await this.workerRegistry.notifyAll(this.jobManager);
 
-        return this.sendJson(res, 201, job);
+        return this.sendJson(res, 201, { jobs });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 
@@ -119,14 +145,28 @@ class Server {
     if (req.method === 'GET' && url.pathname === '/api/jobs/next') {
       const workerIp = url.searchParams.get('workerIp') || req.socket.remoteAddress || null;
       const workerName = url.searchParams.get('workerName') || null;
+      const workerIsp = url.searchParams.get('isp') || '';
 
-      const claimedJob = await this.jobManager.claimNextJob(workerIp, workerName);
+      // The poll itself is the worker heartbeat — record presence on every claim attempt.
+      this.workerPresence.touch({ name: workerName, ip: workerIp, isp: workerIsp });
+
+      const claimedJob = await this.jobManager.claimNextJob(workerIp, workerName, workerIsp);
 
       if (claimedJob) {
         return this.sendJson(res, 200, claimedJob);
       }
 
-      return this.workerRegistry.add(res, this.jobManager, workerIp, workerName);
+      return this.workerRegistry.add(res, this.jobManager, workerIp, workerName, workerIsp);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/workers') {
+      const busyWorkerNames = await this.jobManager.listRunningWorkerNames();
+      return this.sendJson(res, 200, { workers: this.workerPresence.list(busyWorkerNames) });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/isps') {
+      const busyWorkerNames = await this.jobManager.listRunningWorkerNames();
+      return this.sendJson(res, 200, { isps: this.workerPresence.onlineIsps(busyWorkerNames) });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/jobs/latest-result') {

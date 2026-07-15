@@ -46,6 +46,12 @@
           <button class="start-button" type="submit">Start</button>
         </form>
 
+        <div class="isp-field" id="isp-field" hidden>
+          <span class="isp-label">Nhà mạng (ISP) — chỉ hiển thị worker đang online</span>
+          <div class="isp-options" id="isp-options"></div>
+          <p class="isp-empty" id="isp-empty" hidden>Không có worker ISP nào online.</p>
+        </div>
+
         <div class="job-row" aria-live="polite">
           <span>Job ID: <strong id="job-id">-</strong></span>
           <span>GROUP: <strong id="group-label">-</strong></span>
@@ -81,6 +87,13 @@
         <iframe id="report-frame" title="Mono report preview"></iframe>
       </section>
     </main>
+
+    <aside class="worker-panel" id="worker-panel" aria-label="Worker status">
+      <h2>Máy Worker</h2>
+      <ul class="worker-list" id="worker-list">
+        <li class="worker-empty">Đang tải...</li>
+      </ul>
+    </aside>
 
     <script src="./app.js" type="module"></script>
   </body>
