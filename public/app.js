@@ -373,9 +373,9 @@ class WorkerPanel {
       return;
     }
 
-    for (const worker of workers) {
+    for (const group of this.groupByIsp(workers)) {
       const item = document.createElement('li');
-      item.className = `worker-item ${worker.online ? 'is-online' : 'is-offline'}`;
+      item.className = `worker-item ${group.online > 0 ? 'is-online' : 'is-offline'}`;
 
       const dot = document.createElement('span');
       dot.className = 'worker-dot';
@@ -385,16 +385,34 @@ class WorkerPanel {
 
       const name = document.createElement('span');
       name.className = 'worker-name';
-      name.textContent = worker.name;
+      name.textContent = group.isp;
 
       const isp = document.createElement('span');
       isp.className = 'worker-isp';
-      isp.textContent = worker.isp || 'no ISP';
+      isp.textContent = `${group.online}/${group.total} worker online`;
 
       info.append(name, isp);
       item.append(info, dot);
       this.list.append(item);
     }
+  }
+
+  // One machine launches WORKER_COUNT processes sharing one ISP (start-workers.bat), so the raw
+  // roster shows near-identical rows. Collapse to one row per ISP with an online/total count.
+  groupByIsp(workers) {
+    const groups = new Map();
+
+    for (const worker of workers) {
+      const key = worker.isp || 'no ISP';
+      const group = groups.get(key) || { isp: key, total: 0, online: 0 };
+      group.total += 1;
+      if (worker.online) {
+        group.online += 1;
+      }
+      groups.set(key, group);
+    }
+
+    return [...groups.values()].sort((a, b) => a.isp.localeCompare(b.isp));
   }
 
   // Distinct ISPs of workers that are currently online — drives the checkAccess ISP checkboxes.
